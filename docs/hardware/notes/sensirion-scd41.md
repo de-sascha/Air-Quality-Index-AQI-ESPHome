@@ -1,8 +1,11 @@
 # Sensirion SCD41
 
 **Manufacturer documentation:**
-- [Sensirion SCD4x datasheet (PDF)](https://sensirion.com/media/documents/48C4B7FB/64C134E7/Sensirion_SCD4x_Datasheet.pdf)
-- [Sensirion SCD4x product page](https://sensirion.com/products/catalog/SCD41)
+- [sensirion-scd4x.pdf](../datasheets/sensirion-scd4x.pdf) — archived
+  local copy of the official Sensirion SCD4x datasheet
+- [Sensirion SCD4x datasheet on sensirion.com](https://sensirion.com/media/documents/48C4B7FB/64C134E7/Sensirion_SCD4x_Datasheet.pdf)
+  (source of the local copy)
+- [Sensirion SCD41 product page](https://sensirion.com/products/catalog/SCD41)
 
 Datasheet is authoritative for accuracy, timing, and register-level
 communication. When any value below contradicts the datasheet,

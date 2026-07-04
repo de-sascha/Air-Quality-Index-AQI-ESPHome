@@ -1,8 +1,12 @@
 # DOIT ESP32-C6-DevKitC-1 (N4 / N8 / N16 variants)
 
 **Manufacturer documentation:**
-- [Espressif ESP32-C6-DevKitC-1 user guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/hw-reference/esp32c6/user-guide-devkitc-1.html)
-- [ESP32-C6 datasheet (PDF)](https://www.espressif.com/sites/default/files/documentation/esp32-c6_datasheet_en.pdf)
+- [espressif-esp32-c6-datasheet.pdf](../datasheets/espressif-esp32-c6-datasheet.pdf)
+  — archived local copy of the Espressif ESP32-C6 chip datasheet
+- [Espressif ESP32-C6-DevKitC-1 user guide](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/esp32-c6-devkitc-1/user_guide.html)
+  (authoritative for pin layout, power routing, download-mode timing)
+- [Espressif ESP32-C6 datasheet online](https://www.espressif.com/sites/default/files/documentation/esp32-c6_datasheet_en.pdf)
+  (source of the local copy)
 
 The Espressif user guide is authoritative for pin layout, power
 routing, and download-mode timing. When any value below contradicts

@@ -1,7 +1,10 @@
 # Seeed Studio XIAO ESP32-C6
 
 **Manufacturer documentation:**
-[Seeed Studio Wiki — XIAO ESP32-C6 Getting Started](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/)
+- [Seeed Studio Wiki — XIAO ESP32-C6 Getting Started](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/)
+  (authoritative for the board-specific layout and pinout)
+- [espressif-esp32-c6-datasheet.pdf](../datasheets/espressif-esp32-c6-datasheet.pdf)
+  — the ESP32-C6 SoC datasheet, which describes the chip on this board
 
 That page is the authoritative source for pinout, electrical
 characteristics, current draw, and revision history. When any value
