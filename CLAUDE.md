@@ -111,8 +111,7 @@ call to prove it boots.
 For anything more involved than a boot check, capture the log:
 
 ```bash
-./scripts/live-log.sh                     # 10.20.50.200 by default
-./scripts/live-log.sh <ip-or-mdns>        # any other device
+./scripts/live-log.sh <device-ip-or-mdns>
 ```
 
 The script wraps `esphome logs` and writes a timestamped copy under

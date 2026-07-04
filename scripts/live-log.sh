@@ -19,15 +19,16 @@
 #     small in-page log widget
 #
 # Usage:
-#   ./scripts/live-log.sh                       # defaults to 10.20.50.200
-#   ./scripts/live-log.sh 10.20.50.201          # some other IP
-#   ./scripts/live-log.sh air-quality.local     # mDNS name works too
+#   ./scripts/live-log.sh <device-ip-or-mdns-name>
+#
+# Examples:
+#   ./scripts/live-log.sh air-quality-monitor.local
+#   ./scripts/live-log.sh 192.0.2.42
 #
 # Prerequisites:
-#   - Same as the rebuild script: `esphome` on PATH.
-#   - The distribution firmware in this repo uses NO API encryption
-#     key by default. If you flashed a personal build that DOES set
-#     one, add `--noise-psk <hex>` inside the exec line below.
+#   `esphome` on PATH — usually a Python venv the way you built the
+#   firmware. If you use encryption on your api: block, the API key
+#   is picked up automatically from your firmware/source/secrets.yaml.
 #
 # Stop the stream with Ctrl+C. The captured file stays on disk.
 # =====================================================================
@@ -37,7 +38,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 YAML="$REPO_ROOT/firmware/source/air-quality-monitor.yaml"
 
-DEVICE="${1:-10.20.50.200}"
+if [ $# -lt 1 ]; then
+  echo "usage: $0 <device-ip-or-mdns-name>" >&2
+  echo "  example: $0 air-quality-monitor.local" >&2
+  exit 2
+fi
+
+DEVICE="$1"
 LOGFILE="/tmp/aq-$(date +%Y%m%d-%H%M%S).log"
 
 # Sanity check: esphome available?

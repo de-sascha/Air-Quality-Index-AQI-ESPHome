@@ -45,6 +45,19 @@ jobs:
           restore-keys: |
             esphome-${{ runner.os }}-
 
+      # Same as validate.yml — write a dummy secrets.yaml so the
+      # compile can resolve !secret references. The compiled binary
+      # from CI has these dummy keys baked in and MUST NOT be flashed
+      # to a real device; it exists only to prove the source compiles.
+      - name: Write CI dummy secrets.yaml
+        run: |
+          cat > firmware/source/secrets.yaml <<'EOF'
+          api_encryption_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          ota_password: "ci-dummy-ota-password"
+          web_username: "ci"
+          web_password: "ci-dummy-web-password"
+          EOF
+
       - name: Compile via esphome/build-action
         uses: esphome/build-action@v7
         with:
@@ -52,17 +65,9 @@ jobs:
           version: latest
           esphome-command: compile
 
-      # Upload the built binary as a workflow artifact — makes it
-      # trivial to grab the firmware from a PR check and flash it to
-      # a test device without cloning the branch locally.
-      - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: firmware-${{ github.sha }}
-          path: |
-            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/firmware.factory.bin
-            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/firmware.ota.bin
-            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/bootloader.bin
-            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/ota_data_initial.bin
-          retention-days: 14
-          if-no-files-found: warn
+      # Note: since v0.2.0 the CI compiles with a DUMMY secrets.yaml
+      # (see above). We deliberately do NOT upload the resulting
+      # binaries as workflow artifacts — anyone who downloaded and
+      # flashed such a binary would end up with public well-known
+      # keys on their device. Contributors must compile locally
+      # with their own secrets.yaml to get a usable image.
