@@ -54,7 +54,7 @@ are on a running unit:
 
 | Overview (page 1) | Climate (page 2) | Particulates (page 3) |
 |:---:|:---:|:---:|
-| ![Overview page — LUFTQUALITAET, verdict TOP, 5-segment bar, "alles gut"](docs/images/display-page1-overview.jpg) | ![Climate page — CO₂ 435 ppm OK, Temp 29.7 °C, Humidity 40 % OK](docs/images/display-page2-climate.jpg) | ![Particulates page — PM2.5 9 µg/m³ OK, PM10 9 µg/m³ OK, "alles sauber"](docs/images/display-page3-particulates.jpg) |
+| ![Overview page — LUFTQUALITAET, verdict TOP, 5-segment bar, "alles gut"](docs/images/display-page1-overview.jpg?v=2) | ![Climate page — CO₂ 435 ppm OK, Temp 29.7 °C, Humidity 40 % OK](docs/images/display-page2-climate.jpg?v=2) | ![Particulates page — PM2.5 9 µg/m³ OK, PM10 9 µg/m³ OK, "alles sauber"](docs/images/display-page3-particulates.jpg?v=2) |
 | Overall traffic light, five-segment severity bar, plain-language advice | CO₂, temperature, humidity with per-row status marks | PM1.0 / PM2.5 / PM10 with own verdict |
 
 Under the hood the pages are laid out like this (ASCII mockup of
