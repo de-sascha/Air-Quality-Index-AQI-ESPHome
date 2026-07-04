@@ -98,7 +98,7 @@ Rough prices are hobby-quantity from AliExpress / Amazon in mid-2026.
 | — | **Total** | **~ € 50** | |
 
 All four data-carrying parts (1 – 4) have their manufacturer datasheets
-archived under [`docs/datasheets/`](docs/datasheets/).
+summarised under [`docs/hardware/notes/`](docs/hardware/notes/), with links to the authoritative sources.
 
 ## Wiring at a glance
 
@@ -296,13 +296,14 @@ AirQuality/
 ├── scripts/
 │   └── live-log.sh                       — stream device logs to file
 └── docs/
-    ├── hardware/
-    │   └── wiring.md                     — pinouts + bus diagram + pitfalls
-    └── datasheets/
-        ├── xiao-esp32-c6.pdf
-        ├── doit-esp32-c6-devkitc-1.pdf
-        ├── scd40-scd41-modul.pdf
-        └── pms5003-mit-breakout.pdf
+    └── hardware/
+        ├── wiring.md                     — pinouts + bus diagram + pitfalls
+        └── notes/                        — component summaries + datasheet links
+            ├── README.md
+            ├── xiao-esp32-c6.md
+            ├── sensirion-scd41.md
+            ├── plantower-pms5003.md
+            └── doit-esp32-c6-devkitc-1.md
 ```
 
 ## AQI thresholds
