@@ -37,10 +37,14 @@ jobs:
           import sys, yaml
           from pathlib import Path
 
-          # Custom loader that ignores ESPHome-specific tags like !secret
+          # Custom loader that ignores ESPHome-specific tags like !secret.
+          # add_multi_constructor's callback gets (loader, tag_suffix, node),
+          # so the signature must accept all three arguments even when we
+          # only care about the node's kind.
           class Loader(yaml.SafeLoader): pass
-          def _tag(loader, node):
-              # Represent unknown tags as strings so parsing does not fail.
+          def _tag(loader, tag_suffix, node):
+              # Represent unknown tags as their underlying values so
+              # parsing does not fail on !secret / !include / etc.
               if isinstance(node, yaml.ScalarNode):
                   return loader.construct_scalar(node)
               if isinstance(node, yaml.SequenceNode):
@@ -71,31 +75,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate with esphome/build-action
-        uses: esphome/build-action@v7
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          yaml-file: firmware/source/air-quality-monitor.yaml
-          version: latest
-          # 'config' verifies the config against the ESPHome schema
-          # (component references, sensor IDs, GPIO pin availability
-          # for the target board, etc.) without doing a full compile.
-          # Runs in ~1 minute vs 10-15 for a full build.
-          esphome-command: config
+          python-version: "3.12"
 
-  firmware-checksums:
-    name: Firmware binaries integrity
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Install ESPHome
+        run: pip install esphome
 
-      - name: Verify SHA256SUMS.txt matches firmware binaries
+      # The YAML references !secret values that live only in a
+      # gitignored firmware/source/secrets.yaml on each builder's
+      # machine. For CI we write a fake secrets file with dummy values
+      # so the schema validator can resolve every reference. Nothing
+      # here is a real key — the CI never talks to a real device.
+      - name: Write CI dummy secrets.yaml
         run: |
-          cd firmware/binary
-          if [ ! -f SHA256SUMS.txt ]; then
-            echo "::error::SHA256SUMS.txt missing under firmware/binary/"
-            exit 1
-          fi
-          sha256sum -c SHA256SUMS.txt
+          cat > firmware/source/secrets.yaml <<'EOF'
+          api_encryption_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          ota_password: "ci-dummy-ota-password"
+          web_username: "ci"
+          web_password: "ci-dummy-web-password"
+          EOF
+
+      # `esphome config` verifies the config against ESPHome's schema
+      # (component references, sensor IDs, GPIO pin availability for
+      # the target board, etc.) without doing a full compile. Runs in
+      # about a minute vs 10-15 for a full build — worth having on
+      # every push. The full compile only runs from compile.yml when
+      # firmware/source/** actually changes.
+      - name: Validate ESPHome config
+        run: esphome config firmware/source/air-quality-monitor.yaml
+
+  # (No firmware-checksums job — the repo is source-only since v0.2.0.
+  # Every builder compiles the firmware against their own secrets.yaml,
+  # so there are no shipped binaries to check against SHA256SUMS.txt.)
 
   secret-scan:
     name: Secret / PII scanner
@@ -108,10 +121,9 @@ jobs:
           set -e
           echo "Scanning committed files for likely-private substrings..."
 
-          # Text-only files. Binaries under firmware/binary/ have their
-          # own integrity check via SHA256SUMS.txt, and would false-
-          # positive on random byte sequences.
-          FILES=$(git ls-files | grep -viE '\.(bin|pdf|png|jpg|jpeg|gif|ico|ttf|woff2?)$' | grep -v '^firmware/binary/')
+          # Text-only files. Binary artifacts (fonts, PDFs, images)
+          # would false-positive on random byte sequences.
+          FILES=$(git ls-files | grep -viE '\.(bin|pdf|png|jpg|jpeg|gif|ico|ttf|woff2?)$')
 
           # Patterns that must not appear in any tracked text file:
           #   - private IPv4 ranges (except 192.168.4.1 which is the
@@ -151,8 +163,10 @@ jobs:
 
           # Base64-shaped 44-char strings that end with '=' (typical API
           # encryption key length). Exclude glyph strings in font
-          # declarations (they contain '=' but aren't secrets).
-          bad_b64=$(echo "$FILES" | xargs grep -nHE '\b[A-Za-z0-9+/]{40}={1,2}\b' 2>/dev/null | grep -viE 'glyphs:|charmap|font_' || true)
+          # declarations (they contain '=' but aren't secrets), and
+          # exclude the dummy CI values used by validate.yml /
+          # compile.yml themselves (all-A padding).
+          bad_b64=$(echo "$FILES" | xargs grep -nHE '\b[A-Za-z0-9+/]{40}={1,2}\b' 2>/dev/null | grep -viE 'glyphs:|charmap|font_' | grep -viE '^\.github/workflows/' | grep -viE 'AAAAAAAAAAAA' || true)
           if [ -n "$bad_b64" ]; then
             echo "::error::Found likely base64 secret (44-char string ending with =):"
             echo "$bad_b64"
