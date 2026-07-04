@@ -137,9 +137,9 @@ git push --tags
 are the release date; `PATCH` starts at `0` and increments within the
 same month. Example progression: `v2026.07.0` → same-month follow-up
 `v2026.07.1` → first release of the next month `v2026.08.0`.
-Historic tags predating this scheme (currently only `v0.2.0`) are
-kept as-is; do not retag them. The scheme is also stated at the top
-of `CHANGELOG.md`.
+The scheme is also stated at the top of `CHANGELOG.md`. `v2026.07.0`
+is the first tag under this scheme and the earliest tag that exists
+in the repository.
 
 There are no pre-compiled binaries to keep in sync — the repo is
 source-only. Every builder compiles from their own `secrets.yaml`,
