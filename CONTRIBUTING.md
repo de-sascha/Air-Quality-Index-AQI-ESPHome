@@ -6,21 +6,37 @@ project is developed and how you can join in.
 ## Branch model
 
 - **`main`** — stable, always in a state you would recommend to a newcomer.
-  Every commit on `main` should ideally correspond to a firmware build
-  under `firmware/binary/` that has been verified on real hardware.
-- **`dev`** — the working branch for the maintainer. Experiments,
-  half-finished features and firmware rebuilds land here first.
+- **`dev`** — the working branch for the maintainer. Experiments and
+  half-finished features land here first.
 - **Feature branches** — for larger changes, please branch off `dev`
   with a name like `feat/deep-sleep-mode` or `fix/pms5003-warmup`,
   then open a pull request into `dev`.
 
 Once a batch of changes on `dev` has been verified on hardware, the
-maintainer merges `dev` into `main` and publishes new firmware binaries.
+maintainer merges `dev` into `main` and tags a release.
+
+## First-time setup for anyone building this device
+
+Before you can flash or contribute, install ESPHome and create your
+own `secrets.yaml`:
+
+```bash
+git clone https://github.com/de-sascha/AirQuality
+cd AirQuality
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install esphome
+
+cp firmware/source/secrets.yaml.example firmware/source/secrets.yaml
+# Then edit firmware/source/secrets.yaml and follow the instructions
+# inside — generate a fresh API encryption key, pick strong passwords.
+```
+
+`firmware/source/secrets.yaml` is git-ignored and MUST never be
+committed. Verify with `git status` after saving.
 
 ## Development loop for the maintainer
-
-If you are the maintainer of your own device and want to change the
-firmware, this is the recommended cycle:
 
 ```bash
 # 1. Get onto dev
@@ -30,21 +46,19 @@ git pull
 # 2. Edit the YAML (or docs)
 vim firmware/source/air-quality-monitor.yaml
 
-# 3. Compile locally to catch syntax errors
-esphome compile firmware/source/air-quality-monitor.yaml
+# 3. Sanity-check the config
+esphome config firmware/source/air-quality-monitor.yaml
 
-# 4. Flash to your live device over the air
-esphome upload firmware/source/air-quality-monitor.yaml --device <ip>
+# 4. Flash to the live device over the air
+esphome run firmware/source/air-quality-monitor.yaml --device <ip>
 
 # 5. Watch it work. If the change is a keeper:
 git commit -am "feat: something"
 git push
 ```
 
-Because the YAML in this repository does not reference any `!secret`,
-you do not need a `secrets.yaml` file. Your personal Wi-Fi credentials
-and Home Assistant encryption key live on the ESP itself (in NVS),
-not in the repository. As long as you flash over the air, they survive.
+Wi-Fi credentials are stored on the ESP in NVS after the first
+captive-portal onboarding — they survive OTA updates.
 
 ## Development loop for contributors
 
@@ -57,14 +71,20 @@ git clone https://github.com/<you>/AirQuality
 cd AirQuality
 git checkout -b feat/<short-description> dev
 
-# Change what you want to change
-esphome compile firmware/source/air-quality-monitor.yaml   # sanity check
+# Follow the "First-time setup" above to create your own secrets.yaml
+# and confirm the YAML compiles for you before you push.
+
+esphome config firmware/source/air-quality-monitor.yaml   # sanity check
+esphome compile firmware/source/air-quality-monitor.yaml  # full build
 
 git commit -am "feat: describe your change"
 git push -u origin feat/<short-description>
 
-# Open a pull request against `dev`
+# Open a pull request against `dev`.
 ```
+
+If you cannot flash on hardware you own, please note that in the PR —
+the maintainer will run it on the reference device before merging.
 
 ## What NOT to contribute
 
@@ -73,6 +93,10 @@ git push -u origin feat/<short-description>
   any personally identifiable information. The `.gitignore` already
   excludes `secrets.yaml`, but please be careful with pasted logs
   or screenshots.
+- **No pre-compiled binaries.** The repo is source-only. Every builder
+  compiles the firmware locally against their own `secrets.yaml` —
+  a shared binary would either leak someone's keys or embed dummy
+  keys that provide no protection.
 - **No proprietary firmware or datasheets.** Only manufacturer-published,
   freely redistributable material.
 - **No breaking changes without discussion.** Renaming the display
@@ -80,47 +104,23 @@ git push -u origin feat/<short-description>
   affect people who already flashed the previous release — please open
   an issue first to talk about it.
 
-## Verifying binaries before you flash them
-
-Every commit on `main` that touches `firmware/binary/` also updates
-`SHA256SUMS.txt`. Before you flash a downloaded binary:
-
-```bash
-cd firmware/binary
-shasum -a 256 -c SHA256SUMS.txt
-```
-
-All lines should show `OK`.
-
-## Releasing a new firmware build
+## Releasing
 
 When the maintainer merges `dev` into `main`:
 
 ```bash
 git checkout main
 git merge --no-ff dev
-
-# Rebuild firmware from the merged main
-esphome compile firmware/source/air-quality-monitor.yaml
-
-# Copy the six binaries + regenerate SHA256SUMS
-BUILD=.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor
-cp $BUILD/{bootloader,firmware,firmware.factory,firmware.ota,ota_data_initial}.bin \
-   firmware/binary/
-find .esphome/build -name "partitions.bin" -exec cp {} firmware/binary/ \;
-cd firmware/binary && shasum -a 256 *.bin > SHA256SUMS.txt
-
-git add firmware/binary
-git commit -m "chore(firmware): rebuild for X.Y.Z"
 git push
-```
 
-Tag the commit for a proper release:
-
-```bash
-git tag -a v0.2.0 -m "0.2.0 — <one-line summary>"
+# Tag when meaningful
+git tag -a v0.X.0 -m "0.X.0 — <one-line summary>"
 git push --tags
 ```
+
+Update `CHANGELOG.md` with notable changes, especially anything that
+would require existing builders to regenerate secrets or re-pair with
+Home Assistant.
 
 ## Discussion
 

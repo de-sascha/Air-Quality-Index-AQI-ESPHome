@@ -4,9 +4,9 @@ build/
 .pio/
 .pioenvs/
 
-# Local secrets — never committed. The distribution build does not
-# require secrets, but if you fork and add a personal build, keep
-# any secrets.yaml out of Git.
+# Local secrets — never committed. Every builder must create their
+# own `firmware/source/secrets.yaml` from the tracked
+# `secrets.yaml.example` template (see instructions inside).
 secrets.yaml
 *.PRIVATE
 

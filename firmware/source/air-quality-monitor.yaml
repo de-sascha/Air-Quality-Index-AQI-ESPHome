@@ -1,37 +1,33 @@
 # =====================================================================
-# Air Quality Monitor — Distribution firmware for Seeed XIAO ESP32-C6
+# Air Quality Monitor — ESPHome source for Seeed XIAO ESP32-C6
 # =====================================================================
-# This is the public, secrets-free build intended for anyone who wants
-# to build the device themselves. Detailed hardware wiring, part list
-# and setup instructions live in the repository README.
+# This is the canonical firmware source. It is a template — every
+# builder compiles it with their own local `secrets.yaml` that holds
+# their unique keys and passwords. Nothing sensitive lives in this
+# file or in the repository.
 #
-# Design choices vs. a personal build:
+# What each builder needs to do:
 #
-#   1. No `secrets.yaml` needed.
-#      No hardcoded Wi-Fi credentials or API encryption key.
+#   1. Install ESPHome (`pip install esphome`, see README).
+#   2. Copy `secrets.yaml.example` to `secrets.yaml` and fill in
+#      unique values (generator link in the template).
+#   3. Compile + flash over USB the first time:
+#         esphome run firmware/source/air-quality-monitor.yaml
+#   4. On first boot the device opens the fallback Wi-Fi AP
+#      `AirQuality` (password `12345678`). Join it, complete the
+#      captive-portal onboarding to your home Wi-Fi.
+#   5. In Home Assistant: add the device, paste the API encryption
+#      key from your `secrets.yaml` when prompted.
 #
-#   2. First boot always opens a Wi-Fi AP.
-#      SSID `AirQuality`, password `12345678`. The owner enrolls their
-#      own Wi-Fi through the captive portal.
+# Security features enabled here (matching ESPHome's own recommendation
+# in https://esphome.io/guides/security_best_practices):
 #
-#   3. No OTA password.
-#      First flash must be done over USB. After the device is paired
-#      with Home Assistant, OTA can happen through HA which enforces
-#      its own authentication.
+#   - `api.encryption.key`   → !secret api_encryption_key
+#   - `ota.password`         → !secret ota_password
+#   - `web_server.auth`      → !secret web_username + !secret web_password
 #
-#   4. No API encryption key baked into the firmware.
-#      Home Assistant will generate one automatically the first time it
-#      pairs with the device. The key is stored in NVS (non-volatile
-#      storage) and survives reboots and OTA updates.
-#
-# Onboarding flow for a new device:
-#   1. Flash the firmware over USB with esptool.
-#   2. Phone joins the `AirQuality` Wi-Fi (password `12345678`).
-#   3. The captive portal opens automatically. Pick your home Wi-Fi,
-#      enter its password, save.
-#   4. The AP disappears, the device joins the home Wi-Fi.
-#   5. Home Assistant discovers the device via mDNS. Click "Add" and
-#      HA generates and stores the API key by itself. Done.
+# The three secrets MUST be unique per device — do not copy them from
+# another builder's setup.
 #
 # Hardware:
 #   MCU:              Seeed Studio XIAO ESP32-C6
@@ -65,25 +61,34 @@ esp32:
 # Core services
 # ---------------------------------------------------------------------
 logger:
-  # Default log level: INFO — keeps the log stream readable for daily
-  # use. DEBUG / VERBOSE can be enabled at runtime via the buttons below,
-  # no reboot required.
-  level: INFO
+  # Compile-time log-level ceiling. Setting this to VERBOSE keeps
+  # ESP_LOGD/ESP_LOGV statements in the binary, so the DEBUG / VERBOSE
+  # buttons below can actually raise the runtime level. If this were
+  # left at the runtime default (INFO), those statements would be
+  # optimised out and the buttons would emit "Cannot set log level
+  # higher than pre-compiled INFO" warnings.
+  level: VERBOSE
+  # Runtime default at boot — keeps the log stream readable for daily
+  # use. Buttons switch to DEBUG / VERBOSE on demand without a reboot.
+  initial_level: INFO
   # Log to the native USB-CDC serial (built into the ESP32-C6) so the
   # hardware UART (GPIO 0/1) stays free for the PMS5003.
   hardware_uart: USB_SERIAL_JTAG
 
-# API without encryption key.
-# On first pairing, Home Assistant generates a key and pushes it to the
-# device, which stores it in NVS. Standard ESPHome behaviour, no custom
-# code required.
+# Native API with per-device encryption.
+# Every builder must supply a unique 32-byte base64 key in their local
+# `secrets.yaml`. Generate one at https://esphome.io/components/api
+# (the browser generates it locally, nothing leaves your machine).
+# The same key goes into Home Assistant when it prompts during pairing.
 api:
+  encryption:
+    key: !secret api_encryption_key
 
-# OTA without password.
-# First flash goes over USB. After HA pairing, HA orchestrates OTA
-# updates and provides its own authentication.
+# OTA (Over-The-Air) updates. Password from local secrets.yaml so
+# nobody on the LAN can push arbitrary firmware.
 ota:
   - platform: esphome
+    password: !secret ota_password
 
 # Wi-Fi with no baked-in SSID / password.
 # Freshly flashed devices come up with no client credentials, so they
@@ -116,14 +121,17 @@ improv_serial:
 # `local: true` bakes the assets into the flash so no external CDN is
 # hit — the UI works even without internet access.
 #
-# No auth here because the device typically lives in an isolated
-# IoT network. Add an `auth:` block with username / password if you
-# expose the device more widely.
+# Basic-auth credentials come from local secrets.yaml. Even on a
+# trusted home network this stops a stray browser tab or a lab-mate
+# from restarting the device or triggering factory reset.
 # ---------------------------------------------------------------------
 web_server:
   port: 80
   version: 3
   local: true
+  auth:
+    username: !secret web_username
+    password: !secret web_password
 
 # ---------------------------------------------------------------------
 # I2C bus — shared between the SH1106 OLED and the SCD41 CO2 sensor
@@ -239,8 +247,46 @@ button:
     icon: mdi:restore-alert
 
 # ---------------------------------------------------------------------
+# Language selector
+# ---------------------------------------------------------------------
+# Single switch that drives BOTH the display texts and the values of the
+# state text_sensors (verdict, action, dust action, boot reason).
+# Entity NAMES stay English so Home Assistant entity_ids don't change
+# when the language flips — only the VALUES do.
+#
+# `restore_value: true` persists the choice in NVS across reboots and
+# OTA. Factory reset restores the initial option (English).
+# ---------------------------------------------------------------------
+select:
+  - platform: template
+    name: "Language"
+    id: ui_language
+    icon: mdi:translate
+    optimistic: true
+    restore_value: true
+    initial_option: "English"
+    options:
+      - "English"
+      - "Deutsch"
+    # Force a redraw + refresh of all language-dependent text sensors
+    # the instant the user flips the switch, instead of waiting for the
+    # next scheduled update.
+    on_value:
+      - component.update: verdict_text
+      - component.update: verdict_action
+      - component.update: dust_action
+      - component.update: sys_boot_reason
+      - component.update: sys_uptime_human
+      - component.update: oled
+
+# ---------------------------------------------------------------------
 # Text sensors — Wi-Fi info + AQI verdicts
 # ---------------------------------------------------------------------
+# Anywhere a lambda picks a language-specific string, it uses:
+#   id(ui_language).state == "Deutsch"
+# German is the alternate; English is the default and the fallback for
+# any state where the select has no value yet (should not happen with
+# initial_option set, but defensive).
 text_sensor:
   - platform: wifi_info
     ip_address:
@@ -254,9 +300,9 @@ text_sensor:
       id: sys_mac
 
   # AQI traffic light: one-word overall verdict.
-  # German labels are kept here so people who see the device screen
-  # get the message without needing extra translation. Change them
-  # freely if you prefer other wording.
+  # Follows the Language select — English by default, Deutsch when
+  # the user flips the switch. Wording matches the AQI thresholds table
+  # in README.md (TOP / GOOD / FAIR / POOR / CRITICAL, WHO-style).
   - platform: template
     name: "Air Quality Verdict"
     id: verdict_text
@@ -264,12 +310,13 @@ text_sensor:
     lambda: |-
       if (!id(aqi_overall).has_state()) return {"..."};
       int s = (int)id(aqi_overall).state;
+      bool de = id(ui_language).state == "Deutsch";
       switch(s) {
-        case 0: return {"TOP"};
-        case 1: return {"GUT"};
-        case 2: return {"MITTEL"};
-        case 3: return {"SCHLECHT"};
-        case 4: return {"KRITISCH"};
+        case 0: return de ? std::string("TOP")      : std::string("TOP");
+        case 1: return de ? std::string("GUT")      : std::string("GOOD");
+        case 2: return de ? std::string("MITTEL")   : std::string("FAIR");
+        case 3: return de ? std::string("SCHLECHT") : std::string("POOR");
+        case 4: return de ? std::string("KRITISCH") : std::string("CRITICAL");
       }
       return {"?"};
 
@@ -285,7 +332,8 @@ text_sensor:
     lambda: |-
       if (!id(aqi_overall).has_state()) return {"..."};
       int overall = (int)id(aqi_overall).state;
-      if (overall == 0) return {"alles gut"};
+      bool de = id(ui_language).state == "Deutsch";
+      if (overall == 0) return de ? std::string("alles gut") : std::string("all good");
 
       int co2  = id(aqi_co2).has_state()  ? (int)id(aqi_co2).state  : -1;
       int pm25 = id(aqi_pm25).has_state() ? (int)id(aqi_pm25).state : -1;
@@ -294,22 +342,22 @@ text_sensor:
 
       // PM2.5 first — smallest particles, most harmful.
       if (pm25 >= overall) {
-        if (pm25 >= 4) return {"Reiniger MAX!"};
-        if (pm25 >= 3) return {"Luftreiniger an!"};
-        return {"Feinstaub erhoeht"};
+        if (pm25 >= 4) return de ? std::string("Reiniger MAX!")    : std::string("Purifier MAX!");
+        if (pm25 >= 3) return de ? std::string("Luftreiniger an!") : std::string("Purifier on!");
+        return           de ? std::string("Feinstaub erhoeht")     : std::string("Fine dust up");
       }
       if (pm10 >= overall) {
-        if (pm10 >= 3) return {"Grobstaub, lueften"};
-        return {"Grobstaub leicht"};
+        if (pm10 >= 3) return de ? std::string("Grobstaub, lueften") : std::string("Coarse dust, vent");
+        return           de ? std::string("Grobstaub leicht")        : std::string("Coarse dust mild");
       }
       if (co2 >= overall) {
-        if (co2 >= 3) return {"Fenster auf!"};
-        return {"lueften waere gut"};
+        if (co2 >= 3) return de ? std::string("Fenster auf!")      : std::string("Open window!");
+        return           de ? std::string("lueften waere gut")     : std::string("venting advised");
       }
       if (h >= overall) {
         float hv = id(sens_humidity).state;
-        if (hv > 60) return {"zu feucht, lueften"};
-        return {"zu trocken"};
+        if (hv > 60) return de ? std::string("zu feucht, lueften") : std::string("too humid, vent");
+        return           de ? std::string("zu trocken")            : std::string("too dry");
       }
       return {"..."};
 
@@ -322,19 +370,20 @@ text_sensor:
       int pm25 = id(aqi_pm25).has_state() ? (int)id(aqi_pm25).state : -1;
       int pm10 = id(aqi_pm10).has_state() ? (int)id(aqi_pm10).state : -1;
       if (pm25 < 0 && pm10 < 0) return {"..."};
+      bool de = id(ui_language).state == "Deutsch";
 
       if (pm25 >= pm10) {
-        if (pm25 >= 4) return {"Reiniger MAX, zu!"};
-        if (pm25 >= 3) return {"Luftreiniger an!"};
-        if (pm25 >= 2) return {"Quelle? (Kochen?)"};
-        if (pm25 >= 1) return {"leicht erhoeht"};
-        return {"alles sauber"};
+        if (pm25 >= 4) return de ? std::string("Reiniger MAX, zu!") : std::string("Purifier MAX, shut!");
+        if (pm25 >= 3) return de ? std::string("Luftreiniger an!")  : std::string("Purifier on!");
+        if (pm25 >= 2) return de ? std::string("Quelle? (Kochen?)") : std::string("Source? (cooking?)");
+        if (pm25 >= 1) return de ? std::string("leicht erhoeht")    : std::string("slightly elevated");
+        return           de ? std::string("alles sauber")           : std::string("all clean");
       }
-      if (pm10 >= 4) return {"stark staubig!"};
-      if (pm10 >= 3) return {"Grobstaub, lueften"};
-      if (pm10 >= 2) return {"leicht staubig"};
-      if (pm10 >= 1) return {"minimal staubig"};
-      return {"staubfrei"};
+      if (pm10 >= 4) return de ? std::string("stark staubig!")      : std::string("very dusty!");
+      if (pm10 >= 3) return de ? std::string("Grobstaub, lueften")  : std::string("coarse dust, vent");
+      if (pm10 >= 2) return de ? std::string("leicht staubig")      : std::string("slightly dusty");
+      if (pm10 >= 1) return de ? std::string("minimal staubig")     : std::string("mildly dusty");
+      return           de ? std::string("staubfrei")                : std::string("dust-free");
 
   - platform: template
     name: "Uptime (human)"
@@ -346,6 +395,8 @@ text_sensor:
       int days = total / 86400;
       int hours = (total % 86400) / 3600;
       int mins = (total % 3600) / 60;
+      // Units d/h/m are internationally read the same in both languages —
+      // no translation needed. Keep in sync with the display renderer.
       char buf[32];
       if (days > 0) {
         snprintf(buf, sizeof(buf), "%dd %dh %dm", days, hours, mins);
@@ -368,18 +419,19 @@ text_sensor:
     update_interval: 3600s
     lambda: |-
       esp_reset_reason_t r = esp_reset_reason();
+      bool de = id(ui_language).state == "Deutsch";
       switch (r) {
-        case ESP_RST_POWERON:   return {"Power-On"};
-        case ESP_RST_SW:        return {"Software"};
-        case ESP_RST_PANIC:     return {"Panic/Exception"};
-        case ESP_RST_INT_WDT:   return {"Interrupt Watchdog"};
-        case ESP_RST_TASK_WDT:  return {"Task Watchdog"};
-        case ESP_RST_WDT:       return {"Watchdog"};
-        case ESP_RST_DEEPSLEEP: return {"Deep-Sleep Wake"};
-        case ESP_RST_BROWNOUT:  return {"Brownout"};
-        case ESP_RST_SDIO:      return {"SDIO"};
-        case ESP_RST_USB:       return {"USB Reset"};
-        default:                return {"Unknown"};
+        case ESP_RST_POWERON:   return de ? std::string("Einschalten")        : std::string("Power-On");
+        case ESP_RST_SW:        return de ? std::string("Software")           : std::string("Software");
+        case ESP_RST_PANIC:     return de ? std::string("Ausnahme/Panik")     : std::string("Panic/Exception");
+        case ESP_RST_INT_WDT:   return de ? std::string("Interrupt-Watchdog") : std::string("Interrupt Watchdog");
+        case ESP_RST_TASK_WDT:  return de ? std::string("Task-Watchdog")      : std::string("Task Watchdog");
+        case ESP_RST_WDT:       return de ? std::string("Watchdog")           : std::string("Watchdog");
+        case ESP_RST_DEEPSLEEP: return de ? std::string("Deep-Sleep-Wake")    : std::string("Deep-Sleep Wake");
+        case ESP_RST_BROWNOUT:  return de ? std::string("Brownout")           : std::string("Brownout");
+        case ESP_RST_SDIO:      return de ? std::string("SDIO")               : std::string("SDIO");
+        case ESP_RST_USB:       return de ? std::string("USB-Reset")          : std::string("USB Reset");
+        default:                return de ? std::string("Unbekannt")          : std::string("Unknown");
       }
 
 # ---------------------------------------------------------------------
@@ -416,6 +468,17 @@ font:
     size: 9
     glyphs: "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ "
 
+  # Silkscreen — bitmap pixel font, used ONLY on the setup page.
+  # Native size 8 renders as crisp 1:1 pixel art on the mono OLED,
+  # which reads much better than antialiased Roboto for short
+  # onboarding text. Kept separate from the Roboto family so the
+  # data pages (which need µ, ³, °) are unaffected. Note: Silkscreen
+  # has no lowercase glyphs — lowercase letters render as small caps.
+  - file: "gfonts://Silkscreen"
+    id: font_setup_txt
+    size: 8
+    glyphs: "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ "
+
 # ---------------------------------------------------------------------
 # Time source
 # ---------------------------------------------------------------------
@@ -423,6 +486,27 @@ time:
   - platform: sntp
     id: sntp_time
     timezone: "Europe/Berlin"
+
+# ---------------------------------------------------------------------
+# Wi-Fi setup QR code
+# ---------------------------------------------------------------------
+# Encoded per the Wi-Fi Alliance's WPA-QR standard, which is understood
+# natively by the iOS and Android camera apps:
+#   WIFI:T:WPA;S:<ssid>;P:<password>;;
+#
+# When the customer points their phone camera at the display while the
+# fallback AP is up, the phone offers a one-tap "Join AirQuality"
+# prompt. No manual typing of SSID or password.
+#
+# The QR data is fixed at compile time (matches the SSID/password of
+# the `wifi.ap` block above), so this costs no runtime RAM for encoding.
+# Version-3 QR (29x29 modules) rendered at 2px per module = 58x58 px,
+# which fits the left half of the 128x64 display and stays scannable
+# from typical phone-camera distance.
+# ---------------------------------------------------------------------
+qr_code:
+  - id: qr_wifi
+    value: "WIFI:T:WPA;S:AirQuality;P:12345678;;"
 
 # ---------------------------------------------------------------------
 # Sensors
@@ -596,10 +680,44 @@ display:
     update_interval: 1s
     pages:
 
+      # Setup page — shown ONLY while the device is not connected to a
+      # client Wi-Fi. Contains a scannable WPA-QR for the fallback AP
+      # plus the plaintext credentials as fallback for anyone whose
+      # phone camera doesn't do QR.
+      #
+      # Uses the Silkscreen bitmap font (8 px, uniform) because on the
+      # mono OLED a proper pixel font stays crisp where a scaled
+      # TrueType face gets muddy. Silkscreen has no lowercase glyphs,
+      # so labels are kept short and uppercase (SSID / PW) to look
+      # intentional rather than shouted.
+      #
+      # Layout: 128 x 64 px, no header line. QR at (0, 3), 58x58.
+      # Right column at x=64 shows SSID and PW label/value pairs.
+      # "scan QR" hint sits below the QR at the bottom edge, centered
+      # under the left half so it visually points at the QR.
+      - id: page_setup
+        lambda: |-
+          // QR left, 58x58 px at scale=2 (v3 QR, 29 modules).
+          it.qr_code(0, 0, id(qr_wifi), COLOR_ON, 2);
+
+          // Right column, x=64. Silkscreen 8, uniform size.
+          it.printf(64,  4, id(font_setup_txt), "SSID:");
+          it.printf(64, 16, id(font_setup_txt), "AirQuality");
+
+          // "scan QR" hint in the free strip between the SSID and PW
+          // blocks, aligned to the right column. Sits next to the QR
+          // horizontally so it visually links to it.
+          it.printf(64, 28, id(font_setup_txt), "scan QR");
+
+          it.printf(64, 40, id(font_setup_txt), "PW:");
+          it.printf(64, 52, id(font_setup_txt), "12345678");
+
       # Page 1: overall verdict — the most important page.
       - id: page_overall
         lambda: |-
-          it.printf(0, 0, id(font_header), "LUFTQUALITAET");
+          bool de = id(ui_language).state == "Deutsch";
+          it.printf(0, 0, id(font_header), "%s",
+                    de ? "LUFTQUALITAET" : "AIR QUALITY");
           it.line(0, 13, 127, 13);
 
           int s = id(aqi_overall).has_state() ? (int)id(aqi_overall).state : -1;
@@ -634,7 +752,8 @@ display:
       # Page 2: climate detail — CO2, temperature, humidity.
       - id: page_climate
         lambda: |-
-          it.printf(0, 0, id(font_header), "Klima");
+          bool de = id(ui_language).state == "Deutsch";
+          it.printf(0, 0, id(font_header), "%s", de ? "Klima" : "Climate");
           it.line(0, 13, 127, 13);
 
           auto label = [](int s) -> const char* {
@@ -686,7 +805,9 @@ display:
       # Page 3: particulate matter detail.
       - id: page_pm
         lambda: |-
-          it.printf(0, 0, id(font_header), "Feinstaub");
+          bool de = id(ui_language).state == "Deutsch";
+          it.printf(0, 0, id(font_header), "%s",
+                    de ? "Feinstaub" : "Particulates");
           it.line(0, 13, 127, 13);
 
           auto label = [](int s) -> const char* {
@@ -745,6 +866,7 @@ display:
       # Page 4: system status — clock, IP, SSID, RSSI.
       - id: page_system
         lambda: |-
+          bool de = id(ui_language).state == "Deutsch";
           it.printf(0, 0, id(font_header), "System");
           it.line(0, 13, 127, 13);
 
@@ -752,9 +874,10 @@ display:
           if (now.is_valid()) {
             it.strftime(0,   17, id(font_label), "%H:%M:%S", now);
             it.strftime(127, 17, id(font_label), TextAlign::TOP_RIGHT,
-                        "%d.%m.%Y", now);
+                        de ? "%d.%m.%Y" : "%Y-%m-%d", now);
           } else {
-            it.printf(0, 17, id(font_label), "Time: syncing...");
+            it.printf(0, 17, id(font_label), "%s",
+                      de ? "Zeit: sync..." : "Time: syncing...");
           }
 
           it.printf(0, 32, id(font_label), "IP");
@@ -782,10 +905,36 @@ display:
           }
 
 # ---------------------------------------------------------------------
-# Rotate display pages every 6 seconds — full cycle 4 x 6 s = 24 s.
+# Display rotation logic
+# ---------------------------------------------------------------------
+# When Wi-Fi is connected: rotate through the four data pages every 6s
+# (page_overall -> page_climate -> page_pm -> page_system -> loop).
+# When Wi-Fi is NOT connected (fresh device, factory reset, home Wi-Fi
+# down): the setup page is pinned. Full cycle 4 x 6 s = 24 s.
+#
+# We do NOT use display.page.show_next: because that iterator walks
+# ALL pages in YAML order — and page_setup is first in the list, so
+# once per full lap the rotator would land on page_setup for 6 s
+# even with Wi-Fi up. Instead we round-robin explicitly through
+# only the four data pages by inspecting the currently-active page
+# and picking the next one deterministically.
 # ---------------------------------------------------------------------
 interval:
   - interval: 6s
     then:
-      - display.page.show_next: oled
+      - if:
+          condition:
+            wifi.connected:
+          then:
+            # Home Wi-Fi is up — advance to the next data page,
+            # skipping page_setup entirely.
+            - lambda: |-
+                auto* cur = id(oled).get_active_page();
+                if      (cur == id(page_overall)) id(oled).show_page(id(page_climate));
+                else if (cur == id(page_climate)) id(oled).show_page(id(page_pm));
+                else if (cur == id(page_pm))      id(oled).show_page(id(page_system));
+                else                              id(oled).show_page(id(page_overall));
+          else:
+            # No Wi-Fi — force the setup page and stay there.
+            - display.page.show: page_setup
       - component.update: oled
