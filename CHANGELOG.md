@@ -6,7 +6,7 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 `v2026.07.1` would be a follow-up patch in the same month.
 `v2026.07.0` is the earliest tag in the repository.
 
-## Unreleased
+## v2026.07.1 — 2026-07-04 — Housekeeping
 
 ### Removed
 
