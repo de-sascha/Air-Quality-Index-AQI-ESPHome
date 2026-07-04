@@ -184,53 +184,131 @@ The first compile downloads the ESP-IDF toolchain (~ 1 GB) and takes
 
 ### 4. Configure Wi-Fi (from your phone)
 
-After the flash completes the device starts a Wi-Fi access point:
+When the flash finishes, the device reboots. Give it about 10 seconds,
+then look at the display. You should see a **setup page** with a
+QR code on the left, and the WLAN name (`AirQuality`) and password
+(`12345678`) on the right.
 
-- **SSID:** `AirQuality`
-- **Password:** `12345678`
+You have two ways to join the device's setup network. Pick whichever
+your phone likes:
 
-1. Join the `AirQuality` network from your phone.
-2. Modern iOS and Android open the captive portal automatically. If not,
-   browse to `http://192.168.4.1` manually.
-3. The portal shows a list of Wi-Fi networks in range — pick yours.
-4. Enter the Wi-Fi password of your home network. Save.
-5. The device connects to your Wi-Fi and the `AirQuality` AP disappears.
+**Option A — Scan the QR code (recommended):**
+
+1. Open the camera app on your phone.
+2. Point it at the QR code on the device display.
+3. A prompt appears: *"Join network AirQuality?"* → tap **Join**.
+4. Your phone is now connected to the device. No password to type.
+
+**Option B — Join manually:**
+
+1. Open your phone's Wi-Fi settings.
+2. In the list of visible networks, tap **`AirQuality`**.
+3. Enter the password **`12345678`**.
+
+Once your phone is joined, iOS and Android usually pop up a **captive
+portal** window automatically — a screen showing the setup page for
+the device. If nothing pops up, open a browser on your phone and go
+to **`http://192.168.4.1`** by hand.
+
+The portal shows a list of Wi-Fi networks the device can see around
+you. Pick your **home Wi-Fi**, enter its password, and tap **Save**.
+
+The device connects to your home Wi-Fi and reboots. The `AirQuality`
+setup network disappears, and the display switches from the QR-code
+setup page to the normal rotation (CO₂, temperature, particulates,
+system status).
+
+**Write down the IP address the device now has.** You can read it
+off the display — cycle to the **System** page (fourth screen, wait
+about 20 seconds) and note the `IP` line. This IP is what you'll
+type into Home Assistant and your browser in the next two steps.
 
 ### 5. Add the device to Home Assistant
 
-If you run Home Assistant on the same network:
+You'll need the **API encryption key** from your `secrets.yaml`. If
+your `secrets.yaml` is still open in an editor from step 2, look at
+the `api_encryption_key:` line. Otherwise open the file again:
 
-1. Open Home Assistant → **Settings** → **Devices & Services**.
-2. Home Assistant discovers the device over mDNS and shows a card:
-   **"Air Quality Monitor discovered"** → click **Add**.
-3. HA prompts for the **encryption key**. Paste the value of
-   `api_encryption_key` from your `firmware/source/secrets.yaml`.
-4. All 35+ entities appear immediately.
+- **macOS:** double-click `firmware/source/secrets.yaml` in Finder
+  (opens in TextEdit), or in your terminal run `open firmware/source/secrets.yaml`.
+- **Windows:** right-click the file → **Open with** → **Notepad**.
+- **Linux:** open with your favourite text editor.
 
-If auto-discovery does not fire, **Add Integration → ESPHome →**
-enter the IP of the device and paste the same key.
+Find the line that starts with `api_encryption_key:`. It looks like:
+
+```
+api_encryption_key: "abcDEF123...somethingsomething...XYZ="
+```
+
+Copy **only the value between the double quotes** — not the quotes
+themselves, not `api_encryption_key:`. That's a 44-character string
+usually ending with `=`.
+
+Now in Home Assistant:
+
+1. Open Home Assistant in your browser.
+2. Click **Settings** (bottom-left) → **Devices & Services**.
+3. Look at the top of the page for a section titled **"Discovered"**.
+   You should see a card **"Air Quality Monitor"** with an *"ESPHome"*
+   badge. Click **Configure** (or the card itself).
+4. A dialog opens asking for the **encryption key**. Paste the value
+   you just copied. Click **Submit** (or **OK**).
+5. Home Assistant confirms with **"Success"** and shows the device
+   with all its entities.
+
+**If the device does not appear under "Discovered":**
+
+- Wait a minute — mDNS discovery is not instant.
+- If it still doesn't show up, add it manually: on the same
+  *Devices & Services* page, click **+ Add Integration** (bottom-right)
+  → search for **ESPHome** → click it → in the **Host** field type
+  the IP address of the device (from step 4). Leave the port at
+  `6053`. Click **Submit** → paste the encryption key as above.
+
+**If Home Assistant complains "unable to connect":**
+
+- The most common cause is that your HA installation already knows
+  the device under an *old* encryption key from a previous flash.
+- Go to *Devices & Services*, find any existing *"Air Quality Monitor"*
+  entry, open its three-dot menu → **Delete**.
+- Then re-run the discovery / add-integration steps above with the
+  new key.
 
 ### 6. Open the on-device Web UI (optional)
 
-The device serves the official ESPHome web frontend on port 80:
+Every AirQuality device has its own tiny web page. Handy for a quick
+look at all sensor values, forcing a display refresh, changing the
+display language, or restarting the device — without opening Home
+Assistant.
 
-```
-http://<ip-of-the-device>/
-```
+1. In a browser, go to **`http://<device-ip>/`** (replace `<device-ip>`
+   with the IP address from step 4 — for example
+   `http://192.0.2.42/` if that were your device's address).
+2. The browser asks for a **username and password**. These come
+   from `firmware/source/secrets.yaml`:
+   - **Username:** whatever you set for `web_username:` in the file.
+     Unless you changed it, this is **`admin`**.
+   - **Password:** the value of `web_password:` in the file (between
+     the double quotes, without the quotes).
+3. Click **Sign in** (macOS calls it **Log in**).
 
-The browser prompts for basic-auth credentials — enter `web_username`
-and `web_password` from your `firmware/source/secrets.yaml`. The page
-then gives you:
+You should now see the AirQuality dashboard with:
 
 - **Live values** for every sensor as a card
 - **Switches** (currently: `PMS5003 Active`)
 - **Buttons**: `Restart`, `Restart (Safe Mode)`, `WiFi Reconnect`,
-  `Display Refresh`, `PMS5003 Restart`, `Factory Reset`, and log-level
-  switches (`Log INFO / DEBUG / VERBOSE`)
+  `Display Refresh`, `PMS5003 Restart`, `Factory Reset`, log-level
+  switches (`Log INFO / DEBUG / VERBOSE`), and a `Language` select
+  (English / Deutsch)
 - **Live log stream** at the bottom of the page — very handy for
   spotting problems
 - **OTA form** for uploading a new `firmware.ota.bin` (authenticated
   with `ota_password`)
+
+**Forgot your password?** Open `firmware/source/secrets.yaml` again
+in your text editor — the values are stored there. If you lost that
+file too, generate a new set of secrets (repeat step 2) and re-flash
+the device with `esphome run …`.
 
 ## Streaming logs from a running device
 
