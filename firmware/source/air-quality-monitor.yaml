@@ -1,0 +1,791 @@
+# =====================================================================
+# Air Quality Monitor — Distribution firmware for Seeed XIAO ESP32-C6
+# =====================================================================
+# This is the public, secrets-free build intended for anyone who wants
+# to build the device themselves. Detailed hardware wiring, part list
+# and setup instructions live in the repository README.
+#
+# Design choices vs. a personal build:
+#
+#   1. No `secrets.yaml` needed.
+#      No hardcoded Wi-Fi credentials or API encryption key.
+#
+#   2. First boot always opens a Wi-Fi AP.
+#      SSID `AirQuality`, password `12345678`. The owner enrolls their
+#      own Wi-Fi through the captive portal.
+#
+#   3. No OTA password.
+#      First flash must be done over USB. After the device is paired
+#      with Home Assistant, OTA can happen through HA which enforces
+#      its own authentication.
+#
+#   4. No API encryption key baked into the firmware.
+#      Home Assistant will generate one automatically the first time it
+#      pairs with the device. The key is stored in NVS (non-volatile
+#      storage) and survives reboots and OTA updates.
+#
+# Onboarding flow for a new device:
+#   1. Flash the firmware over USB with esptool.
+#   2. Phone joins the `AirQuality` Wi-Fi (password `12345678`).
+#   3. The captive portal opens automatically. Pick your home Wi-Fi,
+#      enter its password, save.
+#   4. The AP disappears, the device joins the home Wi-Fi.
+#   5. Home Assistant discovers the device via mDNS. Click "Add" and
+#      HA generates and stores the API key by itself. Done.
+#
+# Hardware:
+#   MCU:              Seeed Studio XIAO ESP32-C6
+#   Display:          AZ-Delivery 1.3" OLED (SH1106 controller, I2C 0x3C)
+#   CO2/Climate:      Sensirion SCD41 (I2C 0x62)
+#   Particulate:      Plantower PMS5003 (UART, 5 V supply)
+#
+# Wiring (see docs/hardware for detail):
+#   I2C:  SDA=GPIO22 (silkscreen D4), SCL=GPIO23 (silkscreen D5)
+#   UART: TX=GPIO1  (silkscreen D1)  -> PMS5003 RX
+#         RX=GPIO0  (silkscreen D0)  -> PMS5003 TX
+#   PMS SET pin: GPIO21 (silkscreen D3)
+# =====================================================================
+
+esphome:
+  name: air-quality-monitor
+  friendly_name: Air Quality Monitor
+  on_boot:
+    priority: -10
+    then:
+      - logger.log: "Air Quality Monitor booting..."
+
+# ESP32-C6 requires the esp-idf framework
+esp32:
+  board: esp32-c6-devkitc-1
+  variant: esp32c6
+  framework:
+    type: esp-idf
+
+# ---------------------------------------------------------------------
+# Core services
+# ---------------------------------------------------------------------
+logger:
+  # Default log level: INFO — keeps the log stream readable for daily
+  # use. DEBUG / VERBOSE can be enabled at runtime via the buttons below,
+  # no reboot required.
+  level: INFO
+  # Log to the native USB-CDC serial (built into the ESP32-C6) so the
+  # hardware UART (GPIO 0/1) stays free for the PMS5003.
+  hardware_uart: USB_SERIAL_JTAG
+
+# API without encryption key.
+# On first pairing, Home Assistant generates a key and pushes it to the
+# device, which stores it in NVS. Standard ESPHome behaviour, no custom
+# code required.
+api:
+
+# OTA without password.
+# First flash goes over USB. After HA pairing, HA orchestrates OTA
+# updates and provides its own authentication.
+ota:
+  - platform: esphome
+
+# Wi-Fi with no baked-in SSID / password.
+# Freshly flashed devices come up with no client credentials, so they
+# always start the AP `AirQuality` for onboarding. The user's Wi-Fi
+# credentials get stored in NVS by the captive portal and persist across
+# reboots.
+wifi:
+  ap:
+    ssid: "AirQuality"
+    password: "12345678"
+
+captive_portal:
+
+# improv_serial: the standard ESPHome provisioning protocol (also used
+# by OpenDTU and other Espressif-based projects). Combined with the
+# captive portal, the phone gets a Wi-Fi scan list + password prompt as
+# soon as it connects to the fallback AP.
+improv_serial:
+
+# ---------------------------------------------------------------------
+# Web server — the official ESPHome frontend
+# ---------------------------------------------------------------------
+# Serves a self-contained SPA on port 80 with:
+#   - live values for every entity
+#   - switches / selects / buttons the config exposes
+#   - OTA upload form
+#   - live log stream
+#
+# Version 3 is the current UI (Lit-based SPA + WebSocket + SSE).
+# `local: true` bakes the assets into the flash so no external CDN is
+# hit — the UI works even without internet access.
+#
+# No auth here because the device typically lives in an isolated
+# IoT network. Add an `auth:` block with username / password if you
+# expose the device more widely.
+# ---------------------------------------------------------------------
+web_server:
+  port: 80
+  version: 3
+  local: true
+
+# ---------------------------------------------------------------------
+# I2C bus — shared between the SH1106 OLED and the SCD41 CO2 sensor
+# ---------------------------------------------------------------------
+i2c:
+  sda: GPIO22       # silkscreen D4 on the XIAO ESP32-C6
+  scl: GPIO23       # silkscreen D5 on the XIAO ESP32-C6
+  frequency: 400kHz
+  scan: true        # logs all detected I2C addresses on boot
+  id: bus_a
+
+# ---------------------------------------------------------------------
+# UART for the Plantower PMS5003
+# ---------------------------------------------------------------------
+# Silkscreen "D0" on the XIAO ESP32-C6 maps to GPIO0, not GPIO2 as some
+# older references suggest. An earlier revision used GPIO2 and received
+# zero bytes from the sensor.
+uart:
+  id: uart_pms
+  tx_pin: GPIO1     # silkscreen D1 -> PMS5003 RX
+  rx_pin: GPIO0     # silkscreen D0 <- PMS5003 TX
+  baud_rate: 9600
+  rx_buffer_size: 512
+
+# ---------------------------------------------------------------------
+# PMS5003 SET pin — sleep / wake control
+#   HIGH = active (fan running, measurements streamed)
+#   LOW  = sleep  (fan off, low power)
+# Wire the PMS5003 adapter's SET pin to XIAO D3 (GPIO21).
+# ---------------------------------------------------------------------
+output:
+  - platform: gpio
+    pin: GPIO21     # silkscreen D3
+    id: pms_set_pin
+
+switch:
+  - platform: output
+    name: "PMS5003 Active"
+    id: pms_active
+    output: pms_set_pin
+    restore_mode: ALWAYS_ON
+
+# ---------------------------------------------------------------------
+# Buttons — appear as clickable cards in both Web UI and Home Assistant.
+# Standard ESPHome `button:` platform; each button becomes a HA
+# `button.*` entity that runs the on_press action.
+# ---------------------------------------------------------------------
+button:
+  - platform: restart
+    name: "Restart"
+    id: btn_restart
+    icon: mdi:restart
+
+  - platform: safe_mode
+    name: "Restart (Safe Mode)"
+    id: btn_safe_mode
+    icon: mdi:shield-alert
+
+  - platform: template
+    name: "WiFi Reconnect"
+    id: btn_wifi_reconnect
+    icon: mdi:wifi-refresh
+    on_press:
+      - logger.log: "WiFi reconnect requested via button"
+      - delay: 500ms
+      - lambda: 'App.reboot();'
+
+  - platform: template
+    name: "Display Refresh"
+    id: btn_display_refresh
+    icon: mdi:monitor-eye
+    on_press:
+      - component.update: oled
+
+  - platform: template
+    name: "PMS5003 Restart"
+    id: btn_pms_restart
+    icon: mdi:fan-off
+    on_press:
+      - switch.turn_off: pms_active
+      - delay: 5s
+      - switch.turn_on: pms_active
+
+  - platform: template
+    name: "Log INFO (Default)"
+    id: btn_log_info
+    icon: mdi:information-outline
+    on_press:
+      - logger.set_level: INFO
+      - logger.log: "Log level: INFO (default)"
+
+  - platform: template
+    name: "Log DEBUG On"
+    id: btn_log_debug
+    icon: mdi:bug
+    on_press:
+      - logger.set_level: DEBUG
+      - logger.log: "Log level: DEBUG (verbose)"
+
+  - platform: template
+    name: "Log VERBOSE On"
+    id: btn_log_verbose
+    icon: mdi:bug-check
+    on_press:
+      - logger.set_level: VERBOSE
+      - logger.log: "Log level: VERBOSE (all messages)"
+
+  # Factory reset — wipes stored Wi-Fi credentials + persistent state,
+  # then reboots. Comes back in the as-shipped state (AP `AirQuality`).
+  - platform: factory_reset
+    name: "Factory Reset"
+    id: btn_factory_reset
+    icon: mdi:restore-alert
+
+# ---------------------------------------------------------------------
+# Text sensors — Wi-Fi info + AQI verdicts
+# ---------------------------------------------------------------------
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: sys_ip
+    ssid:
+      name: "SSID"
+      id: sys_ssid
+    mac_address:
+      name: "MAC"
+      id: sys_mac
+
+  # AQI traffic light: one-word overall verdict.
+  # German labels are kept here so people who see the device screen
+  # get the message without needing extra translation. Change them
+  # freely if you prefer other wording.
+  - platform: template
+    name: "Air Quality Verdict"
+    id: verdict_text
+    update_interval: 30s
+    lambda: |-
+      if (!id(aqi_overall).has_state()) return {"..."};
+      int s = (int)id(aqi_overall).state;
+      switch(s) {
+        case 0: return {"TOP"};
+        case 1: return {"GUT"};
+        case 2: return {"MITTEL"};
+        case 3: return {"SCHLECHT"};
+        case 4: return {"KRITISCH"};
+      }
+      return {"?"};
+
+  # Actionable recommendation for the traffic-light page.
+  # Priority: PM (health-relevant) > CO2 > humidity. Temperature is
+  # deliberately excluded because the SCD41 warms itself up inside the
+  # enclosure by a few degrees, so any threshold would trigger false
+  # alarms.
+  - platform: template
+    name: "Air Quality Action"
+    id: verdict_action
+    update_interval: 30s
+    lambda: |-
+      if (!id(aqi_overall).has_state()) return {"..."};
+      int overall = (int)id(aqi_overall).state;
+      if (overall == 0) return {"alles gut"};
+
+      int co2  = id(aqi_co2).has_state()  ? (int)id(aqi_co2).state  : -1;
+      int pm25 = id(aqi_pm25).has_state() ? (int)id(aqi_pm25).state : -1;
+      int pm10 = id(aqi_pm10).has_state() ? (int)id(aqi_pm10).state : -1;
+      int h    = id(aqi_hum).has_state()  ? (int)id(aqi_hum).state  : -1;
+
+      // PM2.5 first — smallest particles, most harmful.
+      if (pm25 >= overall) {
+        if (pm25 >= 4) return {"Reiniger MAX!"};
+        if (pm25 >= 3) return {"Luftreiniger an!"};
+        return {"Feinstaub erhoeht"};
+      }
+      if (pm10 >= overall) {
+        if (pm10 >= 3) return {"Grobstaub, lueften"};
+        return {"Grobstaub leicht"};
+      }
+      if (co2 >= overall) {
+        if (co2 >= 3) return {"Fenster auf!"};
+        return {"lueften waere gut"};
+      }
+      if (h >= overall) {
+        float hv = id(sens_humidity).state;
+        if (hv > 60) return {"zu feucht, lueften"};
+        return {"zu trocken"};
+      }
+      return {"..."};
+
+  # Fine-dust specific recommendation for the dust detail page.
+  - platform: template
+    name: "Dust Action"
+    id: dust_action
+    update_interval: 60s
+    lambda: |-
+      int pm25 = id(aqi_pm25).has_state() ? (int)id(aqi_pm25).state : -1;
+      int pm10 = id(aqi_pm10).has_state() ? (int)id(aqi_pm10).state : -1;
+      if (pm25 < 0 && pm10 < 0) return {"..."};
+
+      if (pm25 >= pm10) {
+        if (pm25 >= 4) return {"Reiniger MAX, zu!"};
+        if (pm25 >= 3) return {"Luftreiniger an!"};
+        if (pm25 >= 2) return {"Quelle? (Kochen?)"};
+        if (pm25 >= 1) return {"leicht erhoeht"};
+        return {"alles sauber"};
+      }
+      if (pm10 >= 4) return {"stark staubig!"};
+      if (pm10 >= 3) return {"Grobstaub, lueften"};
+      if (pm10 >= 2) return {"leicht staubig"};
+      if (pm10 >= 1) return {"minimal staubig"};
+      return {"staubfrei"};
+
+  - platform: template
+    name: "Uptime (human)"
+    id: sys_uptime_human
+    icon: mdi:clock-outline
+    update_interval: 60s
+    lambda: |-
+      uint32_t total = id(sys_uptime).state;
+      int days = total / 86400;
+      int hours = (total % 86400) / 3600;
+      int mins = (total % 3600) / 60;
+      char buf[32];
+      if (days > 0) {
+        snprintf(buf, sizeof(buf), "%dd %dh %dm", days, hours, mins);
+      } else if (hours > 0) {
+        snprintf(buf, sizeof(buf), "%dh %dm", hours, mins);
+      } else {
+        snprintf(buf, sizeof(buf), "%dm", mins);
+      }
+      return {std::string(buf)};
+
+  - platform: version
+    name: "ESPHome Version"
+    id: sys_esphome_version
+    icon: mdi:tag
+
+  - platform: template
+    name: "Boot Reason"
+    id: sys_boot_reason
+    icon: mdi:restart
+    update_interval: 3600s
+    lambda: |-
+      esp_reset_reason_t r = esp_reset_reason();
+      switch (r) {
+        case ESP_RST_POWERON:   return {"Power-On"};
+        case ESP_RST_SW:        return {"Software"};
+        case ESP_RST_PANIC:     return {"Panic/Exception"};
+        case ESP_RST_INT_WDT:   return {"Interrupt Watchdog"};
+        case ESP_RST_TASK_WDT:  return {"Task Watchdog"};
+        case ESP_RST_WDT:       return {"Watchdog"};
+        case ESP_RST_DEEPSLEEP: return {"Deep-Sleep Wake"};
+        case ESP_RST_BROWNOUT:  return {"Brownout"};
+        case ESP_RST_SDIO:      return {"SDIO"};
+        case ESP_RST_USB:       return {"USB Reset"};
+        default:                return {"Unknown"};
+      }
+
+# ---------------------------------------------------------------------
+# Fonts for the SH1106 OLED (128 x 64 monochrome)
+# ---------------------------------------------------------------------
+font:
+  - file: "gfonts://Roboto"
+    id: font_label
+    size: 10
+    glyphs: "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ °µ³"
+  - file: "gfonts://Roboto"
+    id: font_mono
+    size: 10
+    glyphs: "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ "
+  - file: "gfonts://Roboto"
+    id: font_value
+    size: 16
+    glyphs: "!\"%()+,-.0123456789:<>=?ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_abcdefghijklmnopqrstuvwxyz{|}~ °"
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 700
+    id: font_header
+    size: 11
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 700
+    id: font_verdict
+    size: 14
+    glyphs: "!\"()+,-.0123456789:;=?ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_abcdefghijklmnopqrstuvwxyz{|}~ "
+  - file: "gfonts://Roboto"
+    id: font_action
+    size: 9
+    glyphs: "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ "
+
+# ---------------------------------------------------------------------
+# Time source
+# ---------------------------------------------------------------------
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "Europe/Berlin"
+
+# ---------------------------------------------------------------------
+# Sensors
+# ---------------------------------------------------------------------
+sensor:
+  # System diagnostics — visible as cards in Web UI and Home Assistant.
+  - platform: wifi_signal
+    name: "WiFi RSSI"
+    id: sys_rssi
+    update_interval: 30s
+  - platform: uptime
+    name: "Uptime"
+    id: sys_uptime
+    update_interval: 30s
+
+  - platform: internal_temperature
+    name: "CPU Temperature"
+    id: sys_cpu_temp
+    update_interval: 60s
+
+  - platform: template
+    name: "Free Heap"
+    id: sys_free_heap
+    unit_of_measurement: "B"
+    accuracy_decimals: 0
+    lambda: 'return esp_get_free_heap_size();'
+    update_interval: 60s
+    icon: mdi:memory
+
+  - platform: template
+    name: "Max Heap Block"
+    id: sys_max_heap_block
+    unit_of_measurement: "B"
+    accuracy_decimals: 0
+    lambda: 'return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);'
+    update_interval: 60s
+    icon: mdi:memory
+
+  # Sensirion SCD4x (SCD40 / SCD41) — CO2, temperature, humidity.
+  # I2C address 0x62, non-changeable.
+  - platform: scd4x
+    address: 0x62
+    i2c_id: bus_a
+    update_interval: 30s
+    measurement_mode: periodic
+    co2:
+      name: "CO2"
+      id: sens_co2
+    temperature:
+      name: "Temperature"
+      id: sens_temperature
+    humidity:
+      name: "Humidity"
+      id: sens_humidity
+
+  # Plantower PMS5003 particulate matter sensor.
+  # Runs continuously while `pms_active` is on. First stable frame
+  # takes about 30 s after power-on / wake; ESPHome will log a few
+  # frame-sync warnings during that window — expected.
+  - platform: pmsx003
+    type: PMSX003
+    uart_id: uart_pms
+    update_interval: 60s
+    pm_1_0:
+      name: "PM 1.0"
+      id: sens_pm_1_0
+    pm_2_5:
+      name: "PM 2.5"
+      id: sens_pm_2_5
+    pm_10_0:
+      name: "PM 10.0"
+      id: sens_pm_10_0
+
+  # AQI category scores (0..4, one per pollutant).
+  # 0 = excellent, 1 = good, 2 = moderate, 3 = poor, 4 = critical.
+  #
+  # Thresholds:
+  #   CO2 (Pettenkofer / WHO): <800 / <1000 / <1400 / <2000 / else
+  #   PM2.5 (WHO 2021 24 h):    <10 / <15 / <25 / <37 / else
+  #   PM10  (WHO 2021 24 h):    <20 / <45 / <75 / <150 / else
+  #   Hum (comfort + mould):    40-60 / 30-65 / 25-70 / 20-75 / else
+  #
+  # Temperature is intentionally NOT scored — the SCD41 sits inside
+  # the enclosure and self-heats by a few degrees, so a temperature
+  # traffic light would be misleading.
+  - platform: template
+    name: "AQI CO2 Score"
+    id: aqi_co2
+    update_interval: 30s
+    lambda: |-
+      if (!id(sens_co2).has_state()) return {};
+      float v = id(sens_co2).state;
+      if (v < 800)  return 0;
+      if (v < 1000) return 1;
+      if (v < 1400) return 2;
+      if (v < 2000) return 3;
+      return 4;
+
+  - platform: template
+    name: "AQI PM2.5 Score"
+    id: aqi_pm25
+    update_interval: 60s
+    lambda: |-
+      if (!id(sens_pm_2_5).has_state()) return {};
+      float v = id(sens_pm_2_5).state;
+      if (v < 10) return 0;
+      if (v < 15) return 1;
+      if (v < 25) return 2;
+      if (v < 37) return 3;
+      return 4;
+
+  - platform: template
+    name: "AQI PM10 Score"
+    id: aqi_pm10
+    update_interval: 60s
+    lambda: |-
+      if (!id(sens_pm_10_0).has_state()) return {};
+      float v = id(sens_pm_10_0).state;
+      if (v < 20)  return 0;
+      if (v < 45)  return 1;
+      if (v < 75)  return 2;
+      if (v < 150) return 3;
+      return 4;
+
+  - platform: template
+    name: "AQI Humidity Score"
+    id: aqi_hum
+    update_interval: 30s
+    lambda: |-
+      if (!id(sens_humidity).has_state()) return {};
+      float v = id(sens_humidity).state;
+      if (v >= 40 && v <= 60) return 0;
+      if (v >= 30 && v <= 65) return 1;
+      if (v >= 25 && v <= 70) return 2;
+      if (v >= 20 && v <= 75) return 3;
+      return 4;
+
+  # Overall score = worst-of-all category scores.
+  - platform: template
+    name: "AQI Overall Score"
+    id: aqi_overall
+    update_interval: 30s
+    lambda: |-
+      float scores[] = {
+        id(aqi_co2).has_state() ? id(aqi_co2).state : -1.0f,
+        id(aqi_pm25).has_state() ? id(aqi_pm25).state : -1.0f,
+        id(aqi_pm10).has_state() ? id(aqi_pm10).state : -1.0f,
+        id(aqi_hum).has_state() ? id(aqi_hum).state : -1.0f,
+      };
+      float worst = 0;
+      bool any = false;
+      for (float s : scores) {
+        if (s >= 0) { any = true; if (s > worst) worst = s; }
+      }
+      if (!any) return {};
+      return worst;
+
+# ---------------------------------------------------------------------
+# Display — 1.3" OLED, SH1106 controller, 128 x 64 monochrome
+# ---------------------------------------------------------------------
+# ESPHome exposes SH1106 support through the ssd1306_i2c platform.
+# Selecting `model: "SH1106 128x64"` switches the driver accordingly.
+# Do NOT use the plain ssd1306 model with an SH1106 panel — the image
+# ends up shifted by 2 pixels and the first/last column is garbled.
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: "SH1106 128x64"
+    address: 0x3C
+    i2c_id: bus_a
+    update_interval: 1s
+    pages:
+
+      # Page 1: overall verdict — the most important page.
+      - id: page_overall
+        lambda: |-
+          it.printf(0, 0, id(font_header), "LUFTQUALITAET");
+          it.line(0, 13, 127, 13);
+
+          int s = id(aqi_overall).has_state() ? (int)id(aqi_overall).state : -1;
+
+          const char* verdict = "...";
+          if (id(verdict_text).has_state()) verdict = id(verdict_text).state.c_str();
+
+          if (s >= 2) {
+            int fill_h = 16 + (s - 2) * 2;
+            it.filled_rectangle(0, 18, 128, fill_h);
+            it.printf(64, 20, id(font_verdict), COLOR_OFF, TextAlign::TOP_CENTER,
+                      "%s", verdict);
+          } else {
+            it.printf(64, 20, id(font_verdict), TextAlign::TOP_CENTER,
+                      "%s", verdict);
+          }
+
+          for (int i = 0; i < 5; i++) {
+            int x = 6 + i * 24;
+            if (i <= s) {
+              it.filled_rectangle(x, 42, 20, 4);
+            } else {
+              it.rectangle(x, 42, 20, 4);
+            }
+          }
+
+          if (id(verdict_action).has_state()) {
+            it.printf(64, 52, id(font_action), TextAlign::TOP_CENTER,
+                      "%s", id(verdict_action).state.c_str());
+          }
+
+      # Page 2: climate detail — CO2, temperature, humidity.
+      - id: page_climate
+        lambda: |-
+          it.printf(0, 0, id(font_header), "Klima");
+          it.line(0, 13, 127, 13);
+
+          auto label = [](int s) -> const char* {
+            switch(s) {
+              case 0: return "OK";
+              case 1: return "OK";
+              case 2: return "!";
+              case 3: return "!!";
+              case 4: return "!!!";
+              default: return "";
+            }
+          };
+
+          it.printf(0, 17, id(font_label), "CO2");
+          if (id(sens_co2).has_state()) {
+            it.printf(74, 15, id(font_value), TextAlign::TOP_RIGHT,
+                      "%.0f", id(sens_co2).state);
+            it.printf(77, 19, id(font_label), "ppm");
+            if (id(aqi_co2).has_state()) {
+              it.printf(127, 19, id(font_label), TextAlign::TOP_RIGHT,
+                        "%s", label((int)id(aqi_co2).state));
+            }
+          } else {
+            it.printf(74, 15, id(font_value), TextAlign::TOP_RIGHT, "--");
+          }
+
+          it.printf(0, 33, id(font_label), "Temp");
+          if (id(sens_temperature).has_state()) {
+            it.printf(74, 31, id(font_value), TextAlign::TOP_RIGHT,
+                      "%.1f", id(sens_temperature).state);
+            it.printf(77, 35, id(font_label), "\xC2\xB0""C");
+          } else {
+            it.printf(74, 31, id(font_value), TextAlign::TOP_RIGHT, "--");
+          }
+
+          it.printf(0, 49, id(font_label), "Hum");
+          if (id(sens_humidity).has_state()) {
+            it.printf(74, 47, id(font_value), TextAlign::TOP_RIGHT,
+                      "%.0f", id(sens_humidity).state);
+            it.printf(77, 51, id(font_label), "%%");
+            if (id(aqi_hum).has_state()) {
+              it.printf(127, 51, id(font_label), TextAlign::TOP_RIGHT,
+                        "%s", label((int)id(aqi_hum).state));
+            }
+          } else {
+            it.printf(74, 47, id(font_value), TextAlign::TOP_RIGHT, "--");
+          }
+
+      # Page 3: particulate matter detail.
+      - id: page_pm
+        lambda: |-
+          it.printf(0, 0, id(font_header), "Feinstaub");
+          it.line(0, 13, 127, 13);
+
+          auto label = [](int s) -> const char* {
+            switch(s) {
+              case 0: return "OK";
+              case 1: return "OK";
+              case 2: return "!";
+              case 3: return "!!";
+              case 4: return "!!!";
+              default: return "";
+            }
+          };
+
+          it.printf(0, 17, id(font_label), "PM1.0");
+          if (id(sens_pm_1_0).has_state()) {
+            it.printf(74, 17, id(font_label), TextAlign::TOP_RIGHT,
+                      "%.0f", id(sens_pm_1_0).state);
+            it.printf(77, 17, id(font_label), "\xC2\xB5g/m\xC2\xB3");
+          } else {
+            it.printf(74, 17, id(font_label), TextAlign::TOP_RIGHT, "--");
+          }
+
+          it.printf(0, 29, id(font_label), "PM2.5");
+          if (id(sens_pm_2_5).has_state()) {
+            it.printf(74, 29, id(font_label), TextAlign::TOP_RIGHT,
+                      "%.0f", id(sens_pm_2_5).state);
+            it.printf(77, 29, id(font_label), "\xC2\xB5g/m\xC2\xB3");
+            if (id(aqi_pm25).has_state()) {
+              it.printf(127, 29, id(font_label), TextAlign::TOP_RIGHT,
+                        "%s", label((int)id(aqi_pm25).state));
+            }
+          } else {
+            it.printf(74, 29, id(font_label), TextAlign::TOP_RIGHT, "--");
+          }
+
+          it.printf(0, 41, id(font_label), "PM10");
+          if (id(sens_pm_10_0).has_state()) {
+            it.printf(74, 41, id(font_label), TextAlign::TOP_RIGHT,
+                      "%.0f", id(sens_pm_10_0).state);
+            it.printf(77, 41, id(font_label), "\xC2\xB5g/m\xC2\xB3");
+            if (id(aqi_pm10).has_state()) {
+              it.printf(127, 41, id(font_label), TextAlign::TOP_RIGHT,
+                        "%s", label((int)id(aqi_pm10).state));
+            }
+          } else {
+            it.printf(74, 41, id(font_label), TextAlign::TOP_RIGHT, "--");
+          }
+
+          it.line(24, 53, 103, 53);
+
+          if (id(dust_action).has_state()) {
+            it.printf(64, 55, id(font_action), TextAlign::TOP_CENTER,
+                      "%s", id(dust_action).state.c_str());
+          }
+
+      # Page 4: system status — clock, IP, SSID, RSSI.
+      - id: page_system
+        lambda: |-
+          it.printf(0, 0, id(font_header), "System");
+          it.line(0, 13, 127, 13);
+
+          auto now = id(sntp_time).now();
+          if (now.is_valid()) {
+            it.strftime(0,   17, id(font_label), "%H:%M:%S", now);
+            it.strftime(127, 17, id(font_label), TextAlign::TOP_RIGHT,
+                        "%d.%m.%Y", now);
+          } else {
+            it.printf(0, 17, id(font_label), "Time: syncing...");
+          }
+
+          it.printf(0, 32, id(font_label), "IP");
+          if (id(sys_ip).has_state()) {
+            it.printf(127, 32, id(font_mono), TextAlign::TOP_RIGHT,
+                      "%s", id(sys_ip).state.c_str());
+          } else {
+            it.printf(127, 32, id(font_mono), TextAlign::TOP_RIGHT, "--");
+          }
+
+          it.printf(0, 44, id(font_label), "SSID");
+          if (id(sys_ssid).has_state()) {
+            it.printf(127, 44, id(font_mono), TextAlign::TOP_RIGHT,
+                      "%s", id(sys_ssid).state.c_str());
+          } else {
+            it.printf(127, 44, id(font_mono), TextAlign::TOP_RIGHT, "--");
+          }
+
+          it.printf(0, 54, id(font_label), "RSSI");
+          if (id(sys_rssi).has_state()) {
+            it.printf(127, 54, id(font_mono), TextAlign::TOP_RIGHT,
+                      "%.0f dBm", id(sys_rssi).state);
+          } else {
+            it.printf(127, 54, id(font_mono), TextAlign::TOP_RIGHT, "--");
+          }
+
+# ---------------------------------------------------------------------
+# Rotate display pages every 6 seconds — full cycle 4 x 6 s = 24 s.
+# ---------------------------------------------------------------------
+interval:
+  - interval: 6s
+    then:
+      - display.page.show_next: oled
+      - component.update: oled
