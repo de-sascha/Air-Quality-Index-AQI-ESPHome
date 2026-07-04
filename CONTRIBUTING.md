@@ -113,10 +113,17 @@ git checkout main
 git merge --no-ff dev
 git push
 
-# Tag when meaningful
-git tag -a v0.X.0 -m "0.X.0 — <one-line summary>"
+# Tag when meaningful — versions are calendar-based
+git tag -a vYYYY.MM.PATCH -m "YYYY.MM.PATCH — <one-line summary>"
 git push --tags
 ```
+
+Version format is `vYYYY.MM.PATCH`: year + month of the release,
+plus a `PATCH` counter that starts at `0` and increments within the
+same month. So `v2026.07.0` is the first release of July 2026, a
+follow-up patch in the same month is `v2026.07.1`, and the first
+release of the next month is `v2026.08.0`. Historic tags predating
+this scheme (currently only `v0.2.0`) are left untouched.
 
 Update `CHANGELOG.md` with notable changes, especially anything that
 would require existing builders to regenerate secrets or re-pair with

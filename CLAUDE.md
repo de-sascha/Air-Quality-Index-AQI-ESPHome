@@ -129,9 +129,17 @@ Merge `dev` into `main` and tag when meaningful:
 git checkout main
 git merge --no-ff dev
 git push
-git tag -a v0.X.0 -m "<one-line summary>"
+git tag -a vYYYY.MM.PATCH -m "<one-line summary>"
 git push --tags
 ```
+
+**Versions are calendar-based**: `vYYYY.MM.PATCH`. The year and month
+are the release date; `PATCH` starts at `0` and increments within the
+same month. Example progression: `v2026.07.0` → same-month follow-up
+`v2026.07.1` → first release of the next month `v2026.08.0`.
+Historic tags predating this scheme (currently only `v0.2.0`) are
+kept as-is; do not retag them. The scheme is also stated at the top
+of `CHANGELOG.md`.
 
 There are no pre-compiled binaries to keep in sync — the repo is
 source-only. Every builder compiles from their own `secrets.yaml`,
