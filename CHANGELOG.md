@@ -1,5 +1,37 @@
 # Changelog
 
+Versions are calendar-based: `vYYYY.MM.PATCH`. The year and month
+match when the release was cut; `PATCH` increments within the same
+month. Example: `v2026.07.0` is the first release of July 2026,
+`v2026.07.1` would be a follow-up patch in the same month.
+
+Historic tags before this scheme (e.g. `v0.2.0`) are preserved as-is.
+
+## v2026.07.0 — 2026-07-04 — Documentation polish
+
+Documentation-only release. No firmware changes, no need to reflash.
+
+### Added
+
+- **Three photos of a running device** in the README section
+  *What it looks like* — one per data page (overview / climate /
+  particulates), shown alongside the existing ASCII mockups.
+- **`Enclosure` section** in the README documenting the AirGradient
+  DIY Pro (PCB v3.7) case as an interim solution, with an honest
+  fit caveat and a call for a purpose-built case designed for the
+  XIAO ESP32-C6 + SCD41 + PMS5003 + SH1106 layout.
+- **`docs/images/`** directory holding the display photos (source
+  files only; not consumed by the firmware build).
+
+### Fixed
+
+- README display photos rendered rotated 90° on github.com because
+  the original JPEGs relied on an EXIF `Orientation` tag that
+  GitHub's image proxy strips. Photos are now re-encoded with the
+  rotation baked into the pixel data, EXIF removed. A `?v=2`
+  cache-bust suffix on the image URLs forces the camo proxy to
+  fetch the new bytes.
+
 ## v0.2.0 — 2026-07-04 — ESPHome-native rewrite (breaking)
 
 **This release changes the distribution model. Existing binary flashes
