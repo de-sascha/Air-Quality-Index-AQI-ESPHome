@@ -1,7 +1,12 @@
 # Plantower PMS5003 (with 1.25T-to-2.54 mm break-out board)
 
 **Manufacturer documentation:**
-- [Plantower PMS5003 series data manual, English V2.6 (PDF)](https://download.kamami.pl/p564359-PMS5003%20series%20data%20manua_English_V2.6.pdf)
+- [plantower-pms5003.pdf](../datasheets/plantower-pms5003.pdf) —
+  archived local copy of the Plantower PMS5003 V2.3 manual
+- [Adafruit product page for the PMS5003](https://www.adafruit.com/product/3686)
+  (source of the local copy — Plantower does not publish the manual
+  on their own website, Adafruit hosts the copy on their CDN and
+  it has become the de-facto public reference)
 - [Plantower product listing](https://www.plantower.com/en/products_33/74.html)
 
 Datasheet is authoritative for the UART frame format, timing, and
