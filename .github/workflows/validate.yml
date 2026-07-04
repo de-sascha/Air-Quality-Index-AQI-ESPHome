@@ -37,10 +37,14 @@ jobs:
           import sys, yaml
           from pathlib import Path
 
-          # Custom loader that ignores ESPHome-specific tags like !secret
+          # Custom loader that ignores ESPHome-specific tags like !secret.
+          # add_multi_constructor's callback gets (loader, tag_suffix, node),
+          # so the signature must accept all three arguments even when we
+          # only care about the node's kind.
           class Loader(yaml.SafeLoader): pass
-          def _tag(loader, node):
-              # Represent unknown tags as strings so parsing does not fail.
+          def _tag(loader, tag_suffix, node):
+              # Represent unknown tags as their underlying values so
+              # parsing does not fail on !secret / !include / etc.
               if isinstance(node, yaml.ScalarNode):
                   return loader.construct_scalar(node)
               if isinstance(node, yaml.SequenceNode):
@@ -71,6 +75,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ESPHome
+        run: pip install esphome
+
       # The YAML references !secret values that live only in a
       # gitignored firmware/source/secrets.yaml on each builder's
       # machine. For CI we write a fake secrets file with dummy values
@@ -85,16 +97,14 @@ jobs:
           web_password: "ci-dummy-web-password"
           EOF
 
-      - name: Validate with esphome/build-action
-        uses: esphome/build-action@v7
-        with:
-          yaml-file: firmware/source/air-quality-monitor.yaml
-          version: latest
-          # 'config' verifies the config against the ESPHome schema
-          # (component references, sensor IDs, GPIO pin availability
-          # for the target board, etc.) without doing a full compile.
-          # Runs in ~1 minute vs 10-15 for a full build.
-          esphome-command: config
+      # `esphome config` verifies the config against ESPHome's schema
+      # (component references, sensor IDs, GPIO pin availability for
+      # the target board, etc.) without doing a full compile. Runs in
+      # about a minute vs 10-15 for a full build — worth having on
+      # every push. The full compile only runs from compile.yml when
+      # firmware/source/** actually changes.
+      - name: Validate ESPHome config
+        run: esphome config firmware/source/air-quality-monitor.yaml
 
   # (No firmware-checksums job — the repo is source-only since v0.2.0.
   # Every builder compiles the firmware against their own secrets.yaml,
