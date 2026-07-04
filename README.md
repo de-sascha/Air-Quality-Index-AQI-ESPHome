@@ -7,8 +7,11 @@ raw numbers into a plain-language traffic-light verdict on a small OLED
 display, and integrates natively with **Home Assistant**.
 
 The design goal is that any hobbyist can rebuild the device from off-the-shelf
-parts, flash the pre-compiled firmware and be up and running in under an
-hour — without ever entering an API key or copying a secret.
+parts, compile the firmware once with their own encryption keys, and be up and
+running with Home Assistant in an evening. The build follows ESPHome's own
+[security best practices](https://esphome.io/guides/security_best_practices) —
+every device gets a unique API encryption key, OTA password, and web-UI
+password, none of which are stored in this repository.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Firmware](https://img.shields.io/badge/firmware-ESPHome%202026.6.4-brightgreen) ![Board](https://img.shields.io/badge/board-XIAO%20ESP32--C6-orange)
 
@@ -39,9 +42,10 @@ hour — without ever entering an API key or copying a secret.
 - **Integrates with Home Assistant out of the box** via native ESPHome
   API (no Zigbee bridge, no cloud, no MQTT broker required). Home
   Assistant discovers the device automatically over mDNS.
-- **Onboards like a commercial device** — first boot opens the Wi-Fi AP
-  `AirQuality`, a captive portal walks the owner through picking their
-  home Wi-Fi. No serial console, no hard-coded credentials.
+- **Onboards over a captive portal** — after the first USB flash the
+  device opens the Wi-Fi AP `AirQuality`, a portal walks the owner
+  through picking their home Wi-Fi. No home-Wi-Fi credentials are
+  baked into the firmware.
 
 ## What it looks like
 
@@ -119,40 +123,66 @@ pitfalls are in [`docs/hardware/wiring.md`](docs/hardware/wiring.md).
 
 ## Getting started
 
-### 1. Flash the firmware (first time, over USB)
+The device is built from ESPHome sources — you compile the firmware
+once with your own encryption keys, flash it over USB, and add it to
+Home Assistant. Total wall-clock time on the first attempt is about
+30–45 minutes; most of it is the initial ESP-IDF toolchain download.
 
-Precompiled firmware for the Seeed XIAO ESP32-C6 lives under
-[`firmware/binary/`](firmware/binary/). The file you need for a fresh
-device is **`firmware.factory.bin`** — it contains the bootloader,
-partition table and application in one image.
+Prerequisites: **Python 3.10+**, a **USB-C cable**, and about **1.5 GB
+free disk** for the ESP-IDF toolchain.
 
-```bash
-# One-time: install esptool
-pip install esptool
-
-# Connect the XIAO over USB-C, then:
-cd firmware/binary
-esptool.py --chip esp32c6 --port /dev/tty.usbmodem<TAB> \
-  --baud 460800 write_flash 0x0 firmware.factory.bin
-```
-
-Port names by operating system:
-
-| OS      | Port pattern             |
-|---------|--------------------------|
-| macOS   | `/dev/tty.usbmodem*`     |
-| Linux   | `/dev/ttyACM0`           |
-| Windows | `COM3`, `COM4`, …        |
-
-**Integrity check** (optional but recommended):
+### 1. Install ESPHome
 
 ```bash
-shasum -a 256 -c SHA256SUMS.txt
+git clone https://github.com/de-sascha/AirQuality.git
+cd AirQuality
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install esphome
 ```
 
-All lines should say `OK`.
+### 2. Create your local secrets
 
-### 2. Configure Wi-Fi (from your phone)
+Copy the template and fill in the four values:
+
+```bash
+cp firmware/source/secrets.yaml.example firmware/source/secrets.yaml
+```
+
+Open `firmware/source/secrets.yaml` in an editor and follow the
+instructions in the file:
+
+- **`api_encryption_key`** — a 32-byte base64 string. Generate one
+  in your browser at
+  [esphome.io/components/api](https://esphome.io/components/api)
+  (the generator runs locally, nothing leaves your machine). Click
+  *Regenerate*, then *Copy*, then paste into the file. Keep this
+  value at hand — Home Assistant will ask for it during pairing.
+- **`ota_password`** — a long random password. This authenticates
+  wireless firmware updates against your device.
+- **`web_username` / `web_password`** — basic-auth credentials for
+  the on-device web UI (port 80).
+
+`firmware/source/secrets.yaml` is git-ignored — it will never be
+committed. Verify with `git status` after saving.
+
+### 3. Compile and flash over USB
+
+Connect the XIAO over USB-C, then:
+
+```bash
+esphome run firmware/source/air-quality-monitor.yaml
+```
+
+ESPHome auto-detects the serial port. If it does not (multiple ESP
+boards attached), pass `--device /dev/tty.usbmodem…` (macOS),
+`/dev/ttyACM0` (Linux), or `COMx` (Windows).
+
+The first compile downloads the ESP-IDF toolchain (~ 1 GB) and takes
+10–20 minutes. Subsequent compiles finish in about a minute.
+
+### 4. Configure Wi-Fi (from your phone)
 
 After the flash completes the device starts a Wi-Fi access point:
 
@@ -166,21 +196,21 @@ After the flash completes the device starts a Wi-Fi access point:
 4. Enter the Wi-Fi password of your home network. Save.
 5. The device connects to your Wi-Fi and the `AirQuality` AP disappears.
 
-### 3. Add the device to Home Assistant (optional)
+### 5. Add the device to Home Assistant
 
 If you run Home Assistant on the same network:
 
 1. Open Home Assistant → **Settings** → **Devices & Services**.
-2. Home Assistant discovers the device automatically over mDNS and
-   shows a card: **"Air Quality Monitor discovered"** → click **Add**.
-3. HA generates and stores an API encryption key by itself; no key to
-   copy anywhere. All 35+ entities appear immediately.
+2. Home Assistant discovers the device over mDNS and shows a card:
+   **"Air Quality Monitor discovered"** → click **Add**.
+3. HA prompts for the **encryption key**. Paste the value of
+   `api_encryption_key` from your `firmware/source/secrets.yaml`.
+4. All 35+ entities appear immediately.
 
-If auto-discovery does not fire:
+If auto-discovery does not fire, **Add Integration → ESPHome →**
+enter the IP of the device and paste the same key.
 
-- **Add Integration** → **ESPHome** → enter the IP of the device.
-
-### 4. Open the on-device Web UI (optional)
+### 6. Open the on-device Web UI (optional)
 
 The device serves the official ESPHome web frontend on port 80:
 
@@ -188,7 +218,9 @@ The device serves the official ESPHome web frontend on port 80:
 http://<ip-of-the-device>/
 ```
 
-You get:
+The browser prompts for basic-auth credentials — enter `web_username`
+and `web_password` from your `firmware/source/secrets.yaml`. The page
+then gives you:
 
 - **Live values** for every sensor as a card
 - **Switches** (currently: `PMS5003 Active`)
@@ -197,7 +229,26 @@ You get:
   switches (`Log INFO / DEBUG / VERBOSE`)
 - **Live log stream** at the bottom of the page — very handy for
   spotting problems
-- **OTA form** for uploading a new `firmware.ota.bin`
+- **OTA form** for uploading a new `firmware.ota.bin` (authenticated
+  with `ota_password`)
+
+## Streaming logs from a running device
+
+The Web UI has a small live-log widget at the bottom of the page, but
+it has no scrollback and truncates history. For debugging, capture
+the full stream to a file with:
+
+```bash
+./scripts/live-log.sh <device-ip-or-mdns-name>
+```
+
+The script writes a timestamped copy to `/tmp/aq-YYYYMMDD-HHMMSS.log`
+while mirroring every line to your terminal. Combine with the
+**Log DEBUG On** / **Log VERBOSE On** buttons in the Web UI to raise
+the runtime level for a session — the buttons only affect *this*
+stream, not the tiny in-page widget.
+
+Prerequisite is the same as building the firmware: `esphome` on PATH.
 
 ## Recovering a device
 
@@ -209,53 +260,44 @@ password), there are three ways back to the initial state:
   → device reboots into the `AirQuality` AP.
 - **From Home Assistant:** press `button.factory_reset` on the device's
   entity page.
-- **Over USB:** re-flash `firmware.factory.bin` following step 1.
+- **Over USB:** re-run `esphome run firmware/source/air-quality-monitor.yaml`
+  with the device attached — a fresh flash resets the app but keeps
+  your Wi-Fi credentials in NVS; add `esptool --chip esp32c6 erase_flash`
+  first if you need a truly blank slate.
 
-## Building the firmware yourself
+## Rotating secrets
 
-You only need this if you want to change the YAML config, upgrade to a
-newer ESPHome release, or verify the binary from source.
+If any of the four secret values in `firmware/source/secrets.yaml`
+leaks (screenshot, chat log, screen share):
 
-Prerequisites: Python 3.10+.
+1. Edit `firmware/source/secrets.yaml` and replace the leaked value
+   with a fresh one.
+2. `esphome run firmware/source/air-quality-monitor.yaml` — pushes
+   the new firmware to the device via OTA.
+3. For the API key: in Home Assistant → Devices & Services →
+   Air Quality Monitor → **Reconfigure** → paste the new key.
 
-```bash
-# Set up an isolated Python environment
-python3 -m venv .venv
-source .venv/bin/activate
-pip install esphome
-
-# Compile from source (produces firmware.factory.bin under .esphome/build/)
-esphome compile firmware/source/air-quality-monitor.yaml
-
-# Flash directly over USB
-esphome upload firmware/source/air-quality-monitor.yaml
-```
-
-The first compile downloads the ESP-IDF toolchain (~ 1 GB) and takes
-10–20 minutes. Subsequent compiles are cached and complete in about a
-minute.
 
 ## Repository layout
 
 ```
 AirQuality/
-├── README.md                          — this file
-├── LICENSE                            — MIT
+├── README.md                             — this file
+├── CHANGELOG.md                          — release notes
+├── CONTRIBUTING.md                       — dev branch model + workflow
+├── CLAUDE.md                             — working guide for Claude Code
+├── LICENSE                               — MIT
 ├── .gitignore
 ├── firmware/
-│   ├── source/
-│   │   └── air-quality-monitor.yaml   — the single ESPHome config
-│   └── binary/
-│       ├── bootloader.bin
-│       ├── partitions.bin
-│       ├── ota_data_initial.bin
-│       ├── firmware.bin
-│       ├── firmware.factory.bin       — the one to flash on first setup
-│       ├── firmware.ota.bin           — the one to upload via Web UI
-│       └── SHA256SUMS.txt
+│   └── source/
+│       ├── air-quality-monitor.yaml      — the single ESPHome config
+│       ├── secrets.yaml.example          — template for local secrets
+│       └── secrets.yaml                  — YOUR local secrets (gitignored)
+├── scripts/
+│   └── live-log.sh                       — stream device logs to file
 └── docs/
     ├── hardware/
-    │   └── wiring.md                  — pinouts + bus diagram + pitfalls
+    │   └── wiring.md                     — pinouts + bus diagram + pitfalls
     └── datasheets/
         ├── xiao-esp32-c6.pdf
         ├── doit-esp32-c6-devkitc-1.pdf

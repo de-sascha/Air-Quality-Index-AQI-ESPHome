@@ -1,0 +1,68 @@
+name: Full compile
+
+# Full ESPHome compile — actually builds a firmware.factory.bin.
+# Slow (~10-15 minutes) and pulls the ESP-IDF toolchain (~1 GB), so
+# this only runs on pull requests targeting main and on the merge
+# commit. Contributors get fast feedback from validate.yml first.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "firmware/source/**"
+      - ".github/workflows/compile.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "firmware/source/**"
+
+# Only one full-compile at a time per branch — if a new commit lands
+# while one is running, cancel the older one.
+concurrency:
+  group: compile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: esphome compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache the ESP-IDF toolchain and PlatformIO packages between
+      # runs — cuts a fresh 15-minute build down to ~2-3 minutes.
+      # Cache key includes the YAML hash so a config change that
+      # requires new components invalidates the cache correctly.
+      - name: Cache ESPHome build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.esphome
+            firmware/source/.esphome
+          key: esphome-${{ runner.os }}-${{ hashFiles('firmware/source/*.yaml') }}
+          restore-keys: |
+            esphome-${{ runner.os }}-
+
+      - name: Compile via esphome/build-action
+        uses: esphome/build-action@v7
+        with:
+          yaml-file: firmware/source/air-quality-monitor.yaml
+          version: latest
+          esphome-command: compile
+
+      # Upload the built binary as a workflow artifact — makes it
+      # trivial to grab the firmware from a PR check and flash it to
+      # a test device without cloning the branch locally.
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/firmware.factory.bin
+            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/firmware.ota.bin
+            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/bootloader.bin
+            firmware/source/.esphome/build/air-quality-monitor/.pioenvs/air-quality-monitor/ota_data_initial.bin
+          retention-days: 14
+          if-no-files-found: warn

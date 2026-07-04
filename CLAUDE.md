@@ -30,8 +30,7 @@ you have that context.
 
 ## Branch model — always work on `dev`
 
-- `main` is stable. It always matches the firmware shipped under
-  `firmware/binary/`. Do NOT commit to `main` directly.
+- `main` is stable. Do NOT commit to `main` directly.
 - `dev` is where the maintainer edits YAML and tests on live hardware.
   Land your changes here.
 - Larger changes get their own `feat/<name>` or `fix/<name>` branch off
@@ -48,13 +47,15 @@ git pull
 
 `firmware/source/air-quality-monitor.yaml`.
 
-It is the distribution build. It references **no secrets**, has **no
-hardcoded Wi-Fi**, and expects Home Assistant to generate the API
-encryption key on first pairing. Personal data lives on the ESP's NVS
-(non-volatile storage), never in this repo.
+It is an ESPHome template. Every builder compiles it locally with
+their own `firmware/source/secrets.yaml` (gitignored, generated from
+`secrets.yaml.example`). The YAML references four `!secret` values:
+`api_encryption_key`, `ota_password`, `web_username`, `web_password`.
+No other secrets are permitted in the YAML.
 
-If you are ever about to add `!secret ...` to this YAML, stop and ask
-the human. There is almost always a better answer.
+If you are about to add another `!secret ...` to this YAML, stop and
+ask the human — extending the secrets surface is a design decision,
+not a mechanical change.
 
 ## The maintainer's live device
 
@@ -81,18 +82,22 @@ a minute.
 
 ## Verifying a change on live hardware
 
-The device has the official ESPHome web UI on port 80 and the native
-API on port 6053. Two ways to verify a change worked:
+The device has the official ESPHome web UI on port 80 (basic-auth
+protected — credentials in the maintainer's local `secrets.yaml`) and
+the native API on port 6053 (encrypted — key in the maintainer's
+local `secrets.yaml`). Two ways to verify a change worked:
 
 1. Open `http://<device-ip>/` in a browser — every entity is a card,
-   there is a live log stream at the bottom.
-2. Programmatically, use `aioesphomeapi`. The Public-YAML build ships
-   without an encryption key, so the connection needs `password=""`
-   and NO `noise_psk`:
+   there is a live log stream at the bottom. Basic-auth prompt uses
+   `web_username`/`web_password` from `secrets.yaml`.
+2. Programmatically, use `aioesphomeapi` with the encryption key:
 
    ```python
    from aioesphomeapi import APIClient
-   client = APIClient(address="<ip>", port=6053, password="")
+   client = APIClient(
+       address="<ip>", port=6053, password="",
+       noise_psk="<api_encryption_key from secrets.yaml>",
+   )
    await client.connect(login=True)
    info = await client.device_info()
    entities, _ = await client.list_entities_services()
@@ -101,26 +106,38 @@ API on port 6053. Two ways to verify a change worked:
 Never make a substantive change without at least a live device_info()
 call to prove it boots.
 
-## Release process — after merging dev into main
+## Watching the live log stream
+
+For anything more involved than a boot check, capture the log:
+
+```bash
+./scripts/live-log.sh                     # 10.20.50.200 by default
+./scripts/live-log.sh <ip-or-mdns>        # any other device
+```
+
+The script wraps `esphome logs` and writes a timestamped copy under
+`/tmp/aq-*.log` while mirroring to the terminal. The device's DEBUG /
+VERBOSE buttons raise the level only on THIS stream, not on the small
+Web-UI widget — the firmware is compiled with `logger: level: VERBOSE`
+so the extra statements actually exist in the binary. Ctrl+C stops
+the stream and leaves the file on disk.
+
+## Release process
+
+Merge `dev` into `main` and tag when meaningful:
 
 ```bash
 git checkout main
 git merge --no-ff dev
-./scripts/rebuild-firmware.sh    # regenerates firmware/binary/ + SHA256SUMS
-git add firmware/binary
-git commit -m "chore(firmware): rebuild for <topic>"
 git push
-```
-
-Tag a release when meaningful:
-
-```bash
-git tag -a v0.2.0 -m "<one-line summary>"
+git tag -a v0.X.0 -m "<one-line summary>"
 git push --tags
 ```
 
-Never leave `firmware/binary/` out of sync with `firmware/source/`.
-If the source has changed on `main`, the shipped binary must match.
+There are no pre-compiled binaries to keep in sync — the repo is
+source-only. Every builder compiles from their own `secrets.yaml`,
+so a binary artifact would either leak someone's key or be
+useless. Release-note the breaking changes in `CHANGELOG.md`.
 
 ## Things that would break users if you touch them
 
@@ -155,17 +172,15 @@ If the source has changed on `main`, the shipped binary must match.
 - Commit to `main` directly. Always `dev` or a feature branch.
 - Add secrets, API keys, private IPs, home SSIDs, or MAC addresses
   to any committed file. The repository is public.
-- Add a `!secret` reference to `air-quality-monitor.yaml`. It would
-  break the "no secrets needed" property of the distribution build.
+- Ever include `firmware/source/secrets.yaml` contents (real key
+  values, real passwords) in commits, chat replies, or logs. Values
+  in `secrets.yaml.example` are placeholders only.
 - Force-push to `main` or `dev` without explicit human approval.
-- Delete files under `firmware/binary/` unless replacing them via
-  `scripts/rebuild-firmware.sh`.
 
 ## Working on documentation only?
 
-Docs live in `README.md`, `CONTRIBUTING.md`, `docs/`, and this file.
-Doc changes go on `dev` too, get merged into `main`, but do NOT
-trigger a firmware rebuild (`firmware/binary/` stays untouched).
+Docs live in `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `docs/`,
+and this file. Doc changes go on `dev` too, get merged into `main`.
 
 ## Session opener the maintainer typically uses
 
