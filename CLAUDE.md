@@ -163,8 +163,9 @@ useless. Release-note the breaking changes in `CHANGELOG.md`.
   any YAML edit to catch schema errors before compiling.
 - Before proposing a firmware rebuild, check with `git status` that
   the working tree is clean, and confirm which branch you are on.
-- When in doubt about a hardware detail, look at the datasheet PDFs
-  under `docs/datasheets/`. Do not guess pin numbers.
+- When in doubt about a hardware detail, look at the datasheet notes
+  under `docs/hardware/notes/` (short summaries with links to the
+  authoritative manufacturer datasheets). Do not guess pin numbers.
 
 ## Things Claude should never do
 

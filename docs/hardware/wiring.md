@@ -16,7 +16,7 @@ The full ESPHome YAML is [`firmware/source/air-quality-monitor.yaml`](../../firm
 | 4 | AZ-Delivery 1.3" OLED (SH1106 controller) | 128 × 64 monochrome display | I²C (`0x3C`) | 3.3 V |
 | 5 | Jumper wires, breadboard, USB-C cable | — | — | — |
 
-Datasheets are archived under [`docs/datasheets/`](../datasheets/).
+Component notes and links to the authoritative datasheets live under [`docs/hardware/notes/`](notes/).
 
 ## XIAO ESP32-C6 pinout (front row, 14 pads)
 
