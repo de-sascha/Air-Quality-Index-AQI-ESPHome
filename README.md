@@ -49,7 +49,16 @@ password, none of which are stored in this repository.
 
 ## What it looks like
 
-Display page 1, when the air is fine:
+The device rotates through three data pages every 6 seconds. Here they
+are on a running unit:
+
+| Overview (page 1) | Climate (page 2) | Particulates (page 3) |
+|:---:|:---:|:---:|
+| ![Overview page — LUFTQUALITAET, verdict TOP, 5-segment bar, "alles gut"](docs/images/display-page1-overview.jpg) | ![Climate page — CO₂ 435 ppm OK, Temp 29.7 °C, Humidity 40 % OK](docs/images/display-page2-climate.jpg) | ![Particulates page — PM2.5 9 µg/m³ OK, PM10 9 µg/m³ OK, "alles sauber"](docs/images/display-page3-particulates.jpg) |
+| Overall traffic light, five-segment severity bar, plain-language advice | CO₂, temperature, humidity with per-row status marks | PM1.0 / PM2.5 / PM10 with own verdict |
+
+Under the hood the pages are laid out like this (ASCII mockup of
+page 1, when the air is fine):
 
 ```
 ┌─────────────────────────────────┐
@@ -120,6 +129,33 @@ D3 / GPIO21 (SET) ────────────────────�
 
 The detailed pin table, ASCII bus diagram and a list of common
 pitfalls are in [`docs/hardware/wiring.md`](docs/hardware/wiring.md).
+
+## Enclosure
+
+There is no purpose-built 3D-printable enclosure for this board layout
+yet. As an **interim solution** the maintainer uses the case from the
+AirGradient DIY Pro (PCB v3.7) project:
+
+- Instructions and photos:
+  [airgradient.com — DIY Pro PCB v3.7](https://www.airgradient.com/documentation/kb/kb-old-instructions-the-airgradient-diy-air-quality-sensor-pro-version-pcb-version-3-7/)
+- STL + STEP files (top, bottom, cable-back cover, ZIP):
+  [diy_pro_3d.zip](https://www.airgradient.com/documents/diy-pro/diy_pro_3d.zip)
+
+**Caveat.** The AirGradient case is designed for a different PCB and
+sensor stack, so it is a **loose fit** for this build — physically
+usable, visually acceptable, but a touch too roomy on the inside and
+the mounting bosses do not line up with the XIAO ESP32-C6. It is what
+the maintainer runs at home; the display photos in the section above
+were taken through that case's OLED cut-out.
+
+**Want to help?** If you can design and 3D-print a case that is
+tailored to the exact XIAO ESP32-C6 + SCD41 + PMS5003 + SH1106 layout
+of this project, contributions are very welcome. Preferred route is to
+open an issue on this repository —
+[github.com/de-sascha/AirQuality/issues](https://github.com/de-sascha/AirQuality/issues)
+— with rough sketches or STLs; alternatively, mention **@de-sascha**
+in an existing issue or discussion to get in touch. A merged design
+would replace this section and retire the AirGradient workaround.
 
 ## Getting started
 
@@ -374,6 +410,7 @@ AirQuality/
 ├── scripts/
 │   └── live-log.sh                       — stream device logs to file
 └── docs/
+    ├── images/                           — photos of the running device (used in README)
     └── hardware/
         ├── wiring.md                     — pinouts + bus diagram + pitfalls
         └── notes/                        — component summaries + datasheet links
