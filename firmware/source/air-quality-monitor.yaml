@@ -46,9 +46,145 @@ esphome:
   name: air-quality-monitor
   friendly_name: Air Quality Monitor
   on_boot:
-    priority: -10
+    # Two triggers: an early log line, and a late pass that applies the
+    # persisted display settings AFTER switch/number/select components
+    # have restored their values from NVS. Priority -100 is the standard
+    # "late boot" hook in ESPHome — the display component itself is
+    # already alive by then, so set_contrast / set_rotation / turn_on
+    # all take effect on the very first frame.
+    - priority: -10
+      then:
+        - logger.log: "Air Quality Monitor booting..."
+    - priority: -100
+      then:
+        - script.execute: apply_display_settings
+        # Wait for SCD41 to finish its own startup delay (the ESPHome
+        # scd4x component sends its initial config on setup; if we
+        # slam the sensor with stop/start too early it responds with
+        # NACKs). 3 s is comfortable — the sensor's first measurement
+        # doesn't even land for ~5 s.
+        - delay: 3s
+        - script.execute: apply_temperature_offset
+
+# ---------------------------------------------------------------------
+# Globals — persisted display state
+# ---------------------------------------------------------------------
+# `display_on` and `night_active` gate rendering. The interval-driven
+# page rotator (bottom of the file) skips its update when the display
+# is meant to be dark, and the display component itself is toggled via
+# turn_on()/turn_off() so the SH1106 stops driving the panel entirely
+# (lower current draw, no burn-in).
+globals:
+  - id: night_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+# ---------------------------------------------------------------------
+# Scripts — re-usable action bundles
+# ---------------------------------------------------------------------
+# `apply_display_settings` is the single place that reads the user-facing
+# display entities (brightness, rotation, power switch, night mode) and
+# pushes them into the underlying display component. Called from
+# on_boot, from the on_value handler of every display-related entity,
+# and from the night-mode interval — so there is exactly one code path
+# that touches display state and it stays consistent.
+script:
+  - id: apply_display_settings
     then:
-      - logger.log: "Air Quality Monitor booting..."
+      - lambda: |-
+          // Contrast (SH1106 exposes a single 0..1 slider — treat as
+          // brightness in the UI). Slider is 0..100 percent.
+          float pct = id(display_brightness).state;
+          if (pct < 0)   pct = 0;
+          if (pct > 100) pct = 100;
+          id(oled).set_contrast(pct / 100.0f);
+
+          // Rotation — the select stores a plain "0" / "90" / "180" /
+          // "270" string. Map to the display component's enum.
+          std::string rot = id(display_rotation).state;
+          DisplayRotation r = DISPLAY_ROTATION_0_DEGREES;
+          if      (rot == "90")  r = DISPLAY_ROTATION_90_DEGREES;
+          else if (rot == "180") r = DISPLAY_ROTATION_180_DEGREES;
+          else if (rot == "270") r = DISPLAY_ROTATION_270_DEGREES;
+          id(oled).set_rotation(r);
+
+          // Power — off when user flipped the switch OR night mode is
+          // currently active. Two independent gates, OR'd together.
+          bool user_on = id(display_power).state;
+          bool should_be_on = user_on && !id(night_active);
+          if (should_be_on) {
+            id(oled).turn_on();
+          } else {
+            id(oled).turn_off();
+          }
+
+          // Force a redraw so the change is visible immediately rather
+          // than at the next 1 s tick.
+          id(oled).update();
+
+  # Push a new temperature offset into the SCD41's internal register.
+  #
+  # The Sensirion SCD4x command flow for `set_temperature_offset`
+  # (0x241D) requires the sensor to be in IDLE state — writing while
+  # periodic measurement is running is silently ignored. So the
+  # sequence is:
+  #   1. stop_periodic_measurement (0x3F86), wait 500 ms
+  #   2. set_temperature_offset    (0x241D + u16 + CRC), wait 1 ms
+  #   3. start_periodic_measurement(0x21B1)
+  #
+  # We deliberately do NOT call persist_settings (0x3615) here — that
+  # writes the sensor's EEPROM (limited erase cycles, ~2000). The
+  # button "Save Offset to Sensor EEPROM" (see button: block) is the
+  # explicit save path. NVS on the ESP32 side already survives reboot,
+  # so the offset is re-applied every boot regardless of EEPROM state.
+  #
+  # Encoding per datasheet: raw = offset_deg_c * 65536 / 175.
+  # Range clamp 0..20 °C is enforced by the number entity above but we
+  # re-clamp here defensively.
+  - id: apply_temperature_offset
+    then:
+      - lambda: |-
+          float off = id(temperature_offset).state;
+          if (off < 0)   off = 0;
+          if (off > 20)  off = 20;
+          uint16_t raw = (uint16_t)(off * 65536.0f / 175.0f);
+          ESP_LOGI("scd41", "Applying temperature offset: %.1f °C (raw=0x%04X)", off, raw);
+          // stop_periodic_measurement — required before any config write.
+          // Casts to uint16_t are needed because the Sensirion helper's
+          // template parameter must be an 8- or 16-bit type; a bare
+          // hex literal is `int` and fails a static_assert.
+          id(scd41)->write_command((uint16_t) 0x3F86);
+      - delay: 500ms
+      - lambda: |-
+          float off = id(temperature_offset).state;
+          if (off < 0)   off = 0;
+          if (off > 20)  off = 20;
+          uint16_t raw = (uint16_t)(off * 65536.0f / 175.0f);
+          id(scd41)->write_command((uint16_t) 0x241D, raw);
+      - delay: 10ms
+      - lambda: |-
+          // Resume periodic measurement so subsequent reads keep flowing
+          id(scd41)->write_command((uint16_t) 0x21B1);
+
+  # Explicit EEPROM save. Writes the CURRENT sensor state (including
+  # the offset just applied) to the SCD41's non-volatile memory via
+  # persist_settings (0x3615). Datasheet notes:
+  #   - only permitted in idle state (we stop -> persist -> restart)
+  #   - takes up to 800 ms, sensor must not be talked to during that
+  #   - EEPROM endurance ~2000 cycles, so DO NOT call this on every
+  #     slider change; the button gate is intentional.
+  # This is exposed as its own action so it can be triggered from the
+  # button below.
+  - id: persist_scd41_settings
+    then:
+      - lambda: |-
+          ESP_LOGI("scd41", "Persisting settings to EEPROM (~800 ms)");
+          id(scd41)->write_command((uint16_t) 0x3F86);
+      - delay: 500ms
+      - lambda: 'id(scd41)->write_command((uint16_t) 0x3615);'
+      - delay: 800ms
+      - lambda: 'id(scd41)->write_command((uint16_t) 0x21B1);'
 
 # ESP32-C6 requires the esp-idf framework
 esp32:
@@ -174,6 +310,37 @@ switch:
     output: pms_set_pin
     restore_mode: ALWAYS_ON
 
+  # Master on/off for the OLED. When off, the display component is
+  # turn_off()'d (panel driver disabled, ~5 mA saved) rather than
+  # blanked in software — this also prevents burn-in on the SH1106.
+  # Restored across reboots so a user who wants a headless device
+  # doesn't have to click again after every power cycle.
+  - platform: template
+    name: "Display Power"
+    id: display_power
+    icon: mdi:monitor
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: apply_display_settings
+    on_turn_off:
+      - script.execute: apply_display_settings
+
+  # Master switch for the nightly display blank. When off, the two
+  # datetime entities have no effect and the display stays on 24/7.
+  - platform: template
+    name: "Night Mode Enabled"
+    id: night_mode_enabled
+    icon: mdi:weather-night
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    # No on_turn_off action needed: the interval below re-evaluates
+    # night_active every minute, and the wake path there calls
+    # apply_display_settings when it flips night_active back to false.
+    on_turn_off:
+      - lambda: 'id(night_active) = false;'
+      - script.execute: apply_display_settings
+
 # ---------------------------------------------------------------------
 # Buttons — appear as clickable cards in both Web UI and Home Assistant.
 # Standard ESPHome `button:` platform; each button becomes a HA
@@ -246,6 +413,120 @@ button:
     id: btn_factory_reset
     icon: mdi:restore-alert
 
+  # Push the current `Temperature Offset` value into the SCD41's
+  # non-volatile EEPROM. Two-step operation: first re-applies the
+  # slider value so the sensor's live register is in sync, then
+  # persists. Only click when you're sure — the SCD41 EEPROM has
+  # ~2000 write cycles.
+  - platform: template
+    name: "Save Offset to Sensor EEPROM"
+    id: btn_persist_scd41
+    icon: mdi:content-save-cog
+    on_press:
+      - script.execute: apply_temperature_offset
+      - delay: 1s
+      - script.execute: persist_scd41_settings
+
+  # Restore the Sensirion factory calibration: sets the offset back to
+  # 4.0 °C (the shipped default) both in our NVS-persisted number
+  # entity and in the SCD41's EEPROM. After pressing this, the sensor
+  # is indistinguishable from a freshly unboxed part with respect to
+  # temperature calibration. Uses the same EEPROM write as the save
+  # button above — same ~2000 cycle budget applies.
+  - platform: template
+    name: "Reset Offset to Factory (4 °C)"
+    id: btn_reset_scd41_offset
+    icon: mdi:factory
+    on_press:
+      - logger.log: "Resetting SCD41 temperature offset to factory default (4.0 °C)"
+      - number.set:
+          id: temperature_offset
+          value: 4.0
+      # Give the number entity a beat to publish its new state before
+      # the apply script reads it back.
+      - delay: 500ms
+      - script.execute: apply_temperature_offset
+      - delay: 1s
+      - script.execute: persist_scd41_settings
+
+# ---------------------------------------------------------------------
+# Number entities — user-tunable analog settings
+# ---------------------------------------------------------------------
+# Brightness maps 0..100 % → the SH1106's single 0..1 contrast register.
+# The chip has no separate brightness/contrast pair; the datasheet
+# register is labelled "contrast" but on a mono OLED it behaves as a
+# global luminance control, which is why we surface it as
+# "Brightness" to the user.
+number:
+  - platform: template
+    name: "Display Brightness"
+    id: display_brightness
+    icon: mdi:brightness-6
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 100
+    optimistic: true
+    restore_value: true
+    mode: slider
+    on_value:
+      - script.execute: apply_display_settings
+
+  # SCD41 hardware temperature offset. The SCD41 samples the enclosure,
+  # not the room, so its `Temperature` reading trends 2–6 °C above the
+  # real air temperature depending on enclosure design and self-heating.
+  # This slider writes the offset directly into the sensor's internal
+  # register: `reported = raw − offset`, so INCREASE the offset when
+  # the displayed value is TOO HIGH.
+  #
+  # Sensirion factory default is 4.0 °C. Range 0..20 °C in 0.1° steps
+  # gives room for extreme enclosures without letting a slip enable
+  # nonsense values. Volatile-only by default (survives `restart` of
+  # measurement, not a power cycle) — use the "Save Offset to Sensor
+  # EEPROM" button below to make it permanent inside the sensor. The
+  # ESP32 side always re-applies the NVS-persisted value on boot, so
+  # even without an EEPROM save the setting survives reboots.
+  - platform: template
+    name: "Temperature Offset"
+    id: temperature_offset
+    icon: mdi:thermometer-minus
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 20
+    step: 0.1
+    initial_value: 4.0
+    optimistic: true
+    restore_value: true
+    mode: box
+    on_value:
+      - script.execute: apply_temperature_offset
+
+# ---------------------------------------------------------------------
+# Datetime entities — night-mode window
+# ---------------------------------------------------------------------
+# HA presents these as two time pickers. Default window is 22:00 → 07:00.
+# Values persist across reboots. Wraparound (start > end) is treated as
+# "overnight" — the standard case for a night mode.
+datetime:
+  - platform: template
+    name: "Night Mode Start"
+    id: night_start
+    type: time
+    icon: mdi:weather-sunset-down
+    optimistic: true
+    restore_value: true
+    initial_value: "22:00:00"
+
+  - platform: template
+    name: "Night Mode End"
+    id: night_end
+    type: time
+    icon: mdi:weather-sunset-up
+    optimistic: true
+    restore_value: true
+    initial_value: "07:00:00"
+
 # ---------------------------------------------------------------------
 # Language selector
 # ---------------------------------------------------------------------
@@ -278,6 +559,25 @@ select:
       - component.update: sys_boot_reason
       - component.update: sys_uptime_human
       - component.update: oled
+
+  # Display rotation, in 90-degree steps. Lets the user mount the OLED
+  # in any orientation in a 3D-printed enclosure without opening the
+  # firmware. The option strings are plain integers so the apply script
+  # can parse them directly; the icon hints at the "rotate" action.
+  - platform: template
+    name: "Display Rotation"
+    id: display_rotation
+    icon: mdi:screen-rotation
+    optimistic: true
+    restore_value: true
+    initial_option: "0"
+    options:
+      - "0"
+      - "90"
+      - "180"
+      - "270"
+    on_value:
+      - script.execute: apply_display_settings
 
 # ---------------------------------------------------------------------
 # Text sensors — Wi-Fi info + AQI verdicts
@@ -547,11 +847,19 @@ sensor:
 
   # Sensirion SCD4x (SCD40 / SCD41) — CO2, temperature, humidity.
   # I2C address 0x62, non-changeable.
+  # `id: scd41` gives us a handle to the underlying SCD4XComponent so
+  # the `Temperature Offset` number entity below can push a new offset
+  # value into the sensor's internal register via write_command().
   - platform: scd4x
+    id: scd41
     address: 0x62
     i2c_id: bus_a
     update_interval: 30s
     measurement_mode: periodic
+    # Factory default is 4.0 °C. Our `temperature_offset` number entity
+    # overrides this at runtime; the value here only matters for the
+    # first boot before NVS has a saved user value.
+    temperature_offset: 4.0 °C
     co2:
       name: "CO2"
       id: sens_co2
@@ -918,23 +1226,83 @@ display:
 # even with Wi-Fi up. Instead we round-robin explicitly through
 # only the four data pages by inspecting the currently-active page
 # and picking the next one deterministically.
+#
+# Second interval below re-evaluates night mode every minute. Kept
+# separate from the 6 s page-rotation loop so the two concerns don't
+# get entangled: night mode is a state transition, page rotation is
+# purely presentation.
 # ---------------------------------------------------------------------
 interval:
   - interval: 6s
     then:
+      # Skip everything when the panel is off — no point cycling
+      # invisible pages, and turn_off() disables the driver so an
+      # update() would be a no-op anyway.
       - if:
           condition:
-            wifi.connected:
+            lambda: 'return id(display_power).state && !id(night_active);'
           then:
-            # Home Wi-Fi is up — advance to the next data page,
-            # skipping page_setup entirely.
-            - lambda: |-
-                auto* cur = id(oled).get_active_page();
-                if      (cur == id(page_overall)) id(oled).show_page(id(page_climate));
-                else if (cur == id(page_climate)) id(oled).show_page(id(page_pm));
-                else if (cur == id(page_pm))      id(oled).show_page(id(page_system));
-                else                              id(oled).show_page(id(page_overall));
-          else:
-            # No Wi-Fi — force the setup page and stay there.
-            - display.page.show: page_setup
-      - component.update: oled
+            - if:
+                condition:
+                  wifi.connected:
+                then:
+                  # Home Wi-Fi is up — advance to the next data page,
+                  # skipping page_setup entirely.
+                  - lambda: |-
+                      auto* cur = id(oled).get_active_page();
+                      if      (cur == id(page_overall)) id(oled).show_page(id(page_climate));
+                      else if (cur == id(page_climate)) id(oled).show_page(id(page_pm));
+                      else if (cur == id(page_pm))      id(oled).show_page(id(page_system));
+                      else                              id(oled).show_page(id(page_overall));
+                else:
+                  # No Wi-Fi — force the setup page and stay there.
+                  - display.page.show: page_setup
+            - component.update: oled
+
+  # Night-mode evaluator. Every 60 s: compare wall-clock to the user's
+  # configured window and flip `night_active` accordingly. The window
+  # supports wraparound (start > end, e.g. 22:00-07:00 which is the
+  # default and most common setting). SNTP unsynced → treat as daytime
+  # so a fresh device never boots into a dark display.
+  - interval: 60s
+    then:
+      - lambda: |-
+          if (!id(night_mode_enabled).state) {
+            if (id(night_active)) {
+              id(night_active) = false;
+              id(apply_display_settings).execute();
+            }
+            return;
+          }
+          auto now = id(sntp_time).now();
+          if (!now.is_valid()) {
+            if (id(night_active)) {
+              id(night_active) = false;
+              id(apply_display_settings).execute();
+            }
+            return;
+          }
+
+          // Template datetime entities have no has_state() — but with
+          // initial_value + restore_value they always carry a value
+          // once setup() has run. Read hour/minute directly.
+          auto s = id(night_start)->state_as_esptime();
+          auto e = id(night_end)->state_as_esptime();
+          int now_m   = now.hour * 60 + now.minute;
+          int start_m = s.hour * 60 + s.minute;
+          int end_m   = e.hour * 60 + e.minute;
+
+          bool in_window;
+          if (start_m == end_m) {
+            in_window = false;                       // zero-length window
+          } else if (start_m < end_m) {
+            in_window = (now_m >= start_m && now_m < end_m);
+          } else {
+            // Wraparound across midnight (the default 22:00 -> 07:00).
+            in_window = (now_m >= start_m || now_m < end_m);
+          }
+
+          if (in_window != id(night_active)) {
+            id(night_active) = in_window;
+            id(apply_display_settings).execute();
+          }

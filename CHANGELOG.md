@@ -6,6 +6,72 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 `v2026.07.1` would be a follow-up patch in the same month.
 `v2026.07.0` is the earliest tag in the repository.
 
+## Unreleased
+
+### Added
+
+- **Temperature calibration.** The SCD41 sits inside the enclosure and
+  reads 2–6 °C above the real air temperature depending on case
+  design and self-heating. Three new entities let the user correct
+  this from the Web UI / Home Assistant without a rebuild:
+  - `Temperature Offset` (number, 0–20 °C, step 0.1, default 4.0) —
+    the value is written into the SCD41's on-chip offset register
+    (`set_temperature_offset`, command 0x241D) so the correction
+    happens on the sensor itself, not in software on top. Higher
+    offset → lower reported temperature. Persists in NVS on the ESP,
+    so a reboot preserves the setting even without an EEPROM save.
+  - `Save Offset to Sensor EEPROM` (button) — calls the SCD41's
+    `persist_settings` (0x3615) so the offset survives a full power
+    cycle even without our firmware. Rate-limited by convention:
+    the SCD41 EEPROM tolerates only ~2000 write cycles, so this is
+    a deliberate button, not an on-every-slider-change action.
+  - `Reset Offset to Factory (4 °C)` (button) — restores the
+    Sensirion factory calibration in both places (NVS and sensor
+    EEPROM), leaving the sensor indistinguishable from a freshly
+    unboxed part.
+- **Display controls.** Four new Home-Assistant / Web-UI entities to
+  tune the OLED without a rebuild:
+  - `Display Brightness` (number, 0–100 %, default 100) — slider that
+    drives the SH1106 contrast register. Persists in NVS.
+  - `Display Rotation` (select, `0` / `90` / `180` / `270`, default
+    `0`) — rotates the framebuffer in 90° steps so the display can
+    be mounted in any orientation inside a 3D-printed enclosure.
+    Persists in NVS.
+  - `Display Power` (switch, default on) — hard on/off. When off the
+    SH1106 driver is disabled via `turn_off()` (lower current, no
+    burn-in), not just blanked in software. Persists in NVS.
+- **Night mode.** Blanks the display during a configurable window
+  while leaving CO₂ and particulate sensors running (so Home
+  Assistant history stays continuous).
+  - `Night Mode Enabled` (switch, default on) — master gate.
+  - `Night Mode Start` / `Night Mode End` (datetime, defaults
+    `22:00` / `07:00`) — time pickers, wraparound across midnight is
+    supported (the default 22 → 07 case). Zero-length window (start
+    == end) is treated as always-off.
+  All four entities persist in NVS.
+
+### Internal
+
+- New `apply_display_settings` script centralises all display state
+  transitions (contrast, rotation, power gate). Called from
+  `on_boot` (late, priority `-100`), from every display entity's
+  `on_value`/`on_turn_*`, and from the night-mode interval — so
+  there is exactly one code path that touches the display.
+- New `apply_temperature_offset` and `persist_scd41_settings`
+  scripts wrap the SCD4x command sequence
+  (`stop_periodic_measurement` → command → `start_periodic_measurement`).
+  The sensor is only writable in idle state; the delays match the
+  Sensirion datasheet (500 ms after stop, 800 ms after persist).
+- `on_boot` (priority `-100`) now also re-pushes the offset into the
+  sensor after a 3 s settle, so a power cycle without an EEPROM save
+  still ends up with the user's calibration.
+- Second `on_boot` handler at priority `-100` applies the persisted
+  display state after NVS restore, so the very first rendered frame
+  honours the user's saved brightness / rotation / power state.
+- 60 s interval evaluates the night-mode window against SNTP time.
+  Falls back to "daytime" whenever SNTP is unsynced so a fresh
+  device never boots into a dark display.
+
 ## v2026.07.1 — 2026-07-04 — Housekeeping
 
 ### Removed
