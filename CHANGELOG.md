@@ -6,6 +6,131 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 `v2026.07.1` would be a follow-up patch in the same month.
 `v2026.07.0` is the earliest tag in the repository.
 
+## Unreleased
+
+_Nothing yet._
+
+## v2026.07.2 — 2026-07-06 — Display, offset, Web-UI groups, boot-loop fix
+
+Runtime feature release. Reflash required. No pin-out or AQI-threshold
+changes; no `secrets.yaml` schema change.
+
+### Added
+
+- **Temperature calibration.** The SCD41 sits inside the enclosure and
+  reads 2–6 °C above the real air temperature depending on case
+  design and self-heating. Three new entities let the user correct
+  this from the Web UI / Home Assistant without a rebuild:
+  - `Temperature Offset` (number, 0–10 °C, step 0.1, default 4.0) —
+    the value is written into the SCD41's on-chip offset register
+    (`set_temperature_offset`, command 0x241D) so the correction
+    happens on the sensor itself, not in software on top. Higher
+    offset → lower reported temperature. Persists in NVS on the ESP,
+    so a reboot preserves the setting even without an EEPROM save.
+  - `Save Offset to Sensor EEPROM` (button) — calls the SCD41's
+    `persist_settings` (0x3615) so the offset survives a full power
+    cycle even without our firmware. Rate-limited by convention:
+    the SCD41 EEPROM tolerates only ~2000 write cycles, so this is
+    a deliberate button, not an on-every-slider-change action.
+  - `Reset Offset to Factory (4 °C)` (button) — restores the
+    Sensirion factory calibration in both places (NVS and sensor
+    EEPROM), leaving the sensor indistinguishable from a freshly
+    unboxed part.
+- **Display controls.** Four new Home-Assistant / Web-UI entities to
+  tune the OLED without a rebuild:
+  - `Display Brightness` (number, 0–100 %, default 100) — slider that
+    drives the SH1106 contrast register. Persists in NVS.
+  - `Display Rotation` (select, `0` / `90` / `180` / `270`, default
+    `0`) — rotates the framebuffer in 90° steps so the display can
+    be mounted in any orientation inside a 3D-printed enclosure.
+    Persists in NVS.
+  - `Display Power` (switch, default on) — hard on/off. When off the
+    SH1106 driver is disabled via `turn_off()` (lower current, no
+    burn-in), not just blanked in software. Persists in NVS.
+- **Night mode.** Blanks the display during a configurable window
+  while leaving CO₂ and particulate sensors running (so Home
+  Assistant history stays continuous).
+  - `Night Mode Enabled` (switch, default on) — master gate.
+  - `Night Mode Start` / `Night Mode End` (datetime, defaults
+    `22:00` / `07:00`) — time pickers, wraparound across midnight is
+    supported (the default 22 → 07 case). Zero-length window (start
+    == end) is treated as always-off.
+  All four entities persist in NVS.
+- **Web UI card groups.** The frontpage now splits into thematic
+  boxes instead of one flat list:
+  - `Sensor (SCD41)` — Room Temperature, CO₂, Humidity, Temperature
+    Offset, Save/Reset buttons, AQI scores.
+  - `Sensor (PMS5003)` — PM 1.0 / 2.5 / 10, PMS5003 Active + Restart
+    controls, Dust Action, AQI scores.
+  - `Display` — Brightness, Rotation, Power, Night Mode + Start/End
+    time pickers, Display Refresh, Language, Air Quality Verdict /
+    Action.
+  - `System` — Restart, Restart Safe Mode, WiFi Reconnect, Web UI Auth
+    Required, Factory Reset.
+  - `Diagnostics` — IP, MAC, RSSI, Uptime, ESPHome Version, Boot
+    Reason, CPU Temperature, Heap stats, log-level buttons.
+  Every entity now carries a `web_server.sorting_group_id` and
+  `sorting_weight`.
+- **`Web UI Auth Required`** switch (System group, default on).
+  Toggles whether `http://<device>/` requires basic-auth on the next
+  boot. Flip triggers a 3 s countdown + `App.safe_reboot()`. Guarded
+  by a `boot_settled` global so the reboot action only fires on real
+  user toggles, never during the setup-time state-restore.
+- **Node-Web-UI resilience** on boot. All display touches and SCD41
+  command sequences (offset apply, EEPROM persist) are guarded by
+  `boot_settled`, which flips true 10 s into boot after all
+  components have completed setup. Prevents a Store-access-fault
+  crash observed when `apply_display_settings` ran too early.
+
+### Changed
+
+- **SCD41 `Temperature` renamed to `Room Temperature`.** Reflects
+  that the value is already offset-corrected by the sensor's internal
+  register (see the `Temperature Offset` slider). `entity_id` in
+  Home Assistant changes accordingly.
+- **`Temperature Offset` range is 0–10 °C.** 20 °C offset is not
+  physically plausible in any real enclosure; 0–10 °C covers even
+  extreme self-heating scenarios and prevents slip-of-the-finger
+  nonsense values.
+- **`Night Mode Enabled` switch now reacts immediately.** Extracted
+  the window-evaluation logic into a re-usable `reevaluate_night_mode`
+  script that is called from the switch's on_turn_on/off, from both
+  `Night Mode Start` / `End` on_value handlers, AND from the 60 s
+  heartbeat interval. Previously a Web-UI toggle waited up to a full
+  minute before taking effect.
+
+### Fixed
+
+- **Boot loop on the `Web UI Auth Required` switch.** ESPHome's
+  template switches call `turn_on()`/`turn_off()` during setup to
+  apply their restore_mode-derived state, which triggers
+  `on_turn_on`/`on_turn_off`. Without a guard, the switch's reboot
+  action fired on every boot → infinite loop, silently rolled back
+  via ESP32 OTA slot-swap. The `boot_settled` global (flipped 10 s
+  into boot) gates the reboot trigger so only real user toggles fire.
+
+### Internal
+
+- New `apply_display_settings` script centralises all display state
+  transitions (contrast, rotation, power gate). Called from
+  `on_boot` (late, priority `-100`), from every display entity's
+  `on_value`/`on_turn_*`, and from the night-mode interval — so
+  there is exactly one code path that touches the display.
+- New `apply_temperature_offset` and `persist_scd41_settings`
+  scripts wrap the SCD4x command sequence
+  (`stop_periodic_measurement` → command → `start_periodic_measurement`).
+  The sensor is only writable in idle state; the delays match the
+  Sensirion datasheet (500 ms after stop, 800 ms after persist).
+- `on_boot` (priority `-100`) now also re-pushes the offset into the
+  sensor after a 3 s settle, so a power cycle without an EEPROM save
+  still ends up with the user's calibration.
+- Second `on_boot` handler at priority `-100` applies the persisted
+  display state after NVS restore, so the very first rendered frame
+  honours the user's saved brightness / rotation / power state.
+- 60 s interval evaluates the night-mode window against SNTP time.
+  Falls back to "daytime" whenever SNTP is unsynced so a fresh
+  device never boots into a dark display.
+
 ## v2026.07.1 — 2026-07-04 — Housekeeping
 
 ### Removed
