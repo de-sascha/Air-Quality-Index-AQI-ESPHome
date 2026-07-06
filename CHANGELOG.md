@@ -10,6 +10,31 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
+## v2026.07.3 — 2026-07-06 — Web-UI Auth Required switch removed
+
+Bugfix release. Reflash recommended for users on v2026.07.2. No
+pin-out or AQI-threshold changes; no `secrets.yaml` schema change.
+
+### Removed
+
+- **`Web UI Auth Required` runtime switch.** Removed the entity added
+  in v2026.07.2. The intent had been to let users disable Basic-Auth
+  on the Web UI at runtime for quicker LAN access, but the
+  implementation had a boot-order race (the priority-800 `on_boot`
+  handler reading the template switch's state before ESPHome had
+  restored it from NVS), and every attempted fix ran into further
+  issues (globals not persisted synchronously enough for a
+  fast-follow reboot; `App.safe_reboot()` firing inside the default
+  `safe_mode` `boot_is_good_after` window and triggering an OTA
+  rollback that silently reverted the fix). Since ESPHome does not
+  provide a first-class way to toggle Web-UI auth at runtime, we
+  drop the feature and stay on the standard: Basic-Auth is always
+  on, credentials come from `secrets.yaml` as before.
+  ([#1](https://github.com/de-sascha/AirQuality/issues/1))
+
+  **Home-Assistant impact:** the entity `switch.web_ui_auth_required`
+  is gone. Any automation that toggled it should be removed.
+
 ## v2026.07.2 — 2026-07-06 — Display, offset, Web-UI groups, boot-loop fix
 
 Runtime feature release. Reflash required. No pin-out or AQI-threshold
