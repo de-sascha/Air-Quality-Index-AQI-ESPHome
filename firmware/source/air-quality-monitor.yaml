@@ -46,31 +46,14 @@ esphome:
   name: air-quality-monitor
   friendly_name: Air Quality Monitor
   on_boot:
-    # Three triggers:
-    #   - priority 800: earliest hook. If `Web UI Auth Required` was
-    #     switched OFF, blank the credentials on the web_server_base
-    #     so its setup() (running at priority 700) never installs the
-    #     auth middleware.
-    #   - priority -10: informational log.
+    # Two triggers:
+    #   - priority -10:  informational log.
     #   - priority -100: late boot. Wait 10 s for all components
     #     (display, SCD41) to have completed their own setup() plus a
     #     couple of measurement cycles, THEN flip `boot_settled` and
     #     apply the persisted display + offset state. Without this
     #     delay, touching the SH1106 too early crashes the ESP with a
     #     Store access fault (observed as a boot loop).
-    - priority: 800
-      then:
-        - lambda: |-
-            // Read the persisted mirror (see `web_auth_persisted` global),
-            // NOT `web_auth_required.state` — the template switch has not
-            // yet restored its NVS state at this point in the boot sequence,
-            // so its `.state` always reads as the type-default `false` here.
-            // GitHub issue #1.
-            if (!id(web_auth_persisted)) {
-              id(web_srv_base)->set_auth_username("");
-              id(web_srv_base)->set_auth_password("");
-              ESP_LOGW("aq", "Web UI auth DISABLED via NVS switch — no login required");
-            }
     - priority: -10
       then:
         - logger.log: "Air Quality Monitor booting..."
@@ -92,30 +75,16 @@ globals:
     restore_value: no
     initial_value: 'false'
 
-  # Guard for actions that must NOT fire during setup (e.g. the reboot
-  # trigger of the `Web UI Auth Required` switch, and the display /
-  # SCD41 touch code). ESPHome's template switches call turn_on()/
-  # turn_off() on setup() to apply their restore_mode-derived state,
-  # which triggers on_turn_on/on_turn_off — without this guard the
-  # auth switch's reboot action would fire on every boot. Flips to
-  # true 10 s into boot from the on_boot priority -100 handler.
+  # Guard for actions that must NOT fire during setup — currently the
+  # display / SCD41 touch code. ESPHome runs on_value / apply_* triggers
+  # during setup() as it restores each entity's persisted state; without
+  # this guard the display code would touch the SH1106 before its
+  # setup() completes and crash the ESP. Flips to true 10 s into boot
+  # from the on_boot priority -100 handler.
   - id: boot_settled
     type: bool
     restore_value: no
     initial_value: 'false'
-
-  # Persisted mirror of the `Web UI Auth Required` template switch.
-  # ESPPreferences restores globals BEFORE any component setup() runs,
-  # so this value is already correct at on_boot priority 800 — unlike
-  # the template switch itself, which restores its state inside setup()
-  # (scheduled after priority-800 on_boot). See GitHub issue #1 for the
-  # boot-order race this works around. The initial_value must match
-  # the switch's RESTORE_DEFAULT_ON so a device with clean NVS behaves
-  # the same way for both the global and the switch.
-  - id: web_auth_persisted
-    type: bool
-    restore_value: yes
-    initial_value: 'true'
 
 # ---------------------------------------------------------------------
 # Scripts — re-usable action bundles
@@ -346,11 +315,6 @@ improv_serial:
 # trusted home network this stops a stray browser tab or a lab-mate
 # from restarting the device or triggering factory reset.
 # ---------------------------------------------------------------------
-# Explicit web_server_base id so on_boot (priority 800) can reach it
-# to blank credentials when the `Web UI Auth Required` switch is off.
-web_server_base:
-  id: web_srv_base
-
 web_server:
   port: 80
   version: 3
@@ -459,48 +423,6 @@ switch:
       - script.execute: reevaluate_night_mode
     on_turn_off:
       - script.execute: reevaluate_night_mode
-
-  # Toggles whether http://<device>/ requires basic-auth on the next
-  # boot. Persists in NVS. The switch flip triggers a 3 s countdown +
-  # automatic reboot so the effect is visible without a manual restart.
-  # NOTE: The credentials themselves still live in `secrets.yaml` —
-  # this switch only decides whether the AuthMiddleware is installed
-  # at all. Turning auth back on brings the same web_username /
-  # web_password back into force.
-  #
-  # The boot_settled guard is essential: ESPHome's template switches
-  # call turn_on()/turn_off() during setup() to apply the restore_mode
-  # state, which would trigger on_turn_on/on_turn_off and fire the
-  # reboot action → infinite reboot loop.
-  - platform: template
-    name: "Web UI Auth Required"
-    web_server:
-      sorting_group_id: grp_system
-      sorting_weight: 40
-    id: web_auth_required
-    icon: mdi:lock
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
-    on_turn_off:
-      - lambda: 'id(web_auth_persisted) = false;'
-      - if:
-          condition:
-            lambda: 'return id(boot_settled);'
-          then:
-            - logger.log:
-                format: "Web UI auth will be DISABLED after reboot"
-                level: WARN
-            - delay: 3s
-            - lambda: 'App.safe_reboot();'
-    on_turn_on:
-      - lambda: 'id(web_auth_persisted) = true;'
-      - if:
-          condition:
-            lambda: 'return id(boot_settled);'
-          then:
-            - logger.log: "Web UI auth will be ENABLED after reboot"
-            - delay: 3s
-            - lambda: 'App.safe_reboot();'
 
 # ---------------------------------------------------------------------
 # Buttons — appear as clickable cards in both Web UI and Home Assistant.
