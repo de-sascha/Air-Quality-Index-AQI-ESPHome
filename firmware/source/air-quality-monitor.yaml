@@ -61,7 +61,12 @@ esphome:
     - priority: 800
       then:
         - lambda: |-
-            if (!id(web_auth_required).state) {
+            // Read the persisted mirror (see `web_auth_persisted` global),
+            // NOT `web_auth_required.state` — the template switch has not
+            // yet restored its NVS state at this point in the boot sequence,
+            // so its `.state` always reads as the type-default `false` here.
+            // GitHub issue #1.
+            if (!id(web_auth_persisted)) {
               id(web_srv_base)->set_auth_username("");
               id(web_srv_base)->set_auth_password("");
               ESP_LOGW("aq", "Web UI auth DISABLED via NVS switch — no login required");
@@ -98,6 +103,19 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+
+  # Persisted mirror of the `Web UI Auth Required` template switch.
+  # ESPPreferences restores globals BEFORE any component setup() runs,
+  # so this value is already correct at on_boot priority 800 — unlike
+  # the template switch itself, which restores its state inside setup()
+  # (scheduled after priority-800 on_boot). See GitHub issue #1 for the
+  # boot-order race this works around. The initial_value must match
+  # the switch's RESTORE_DEFAULT_ON so a device with clean NVS behaves
+  # the same way for both the global and the switch.
+  - id: web_auth_persisted
+    type: bool
+    restore_value: yes
+    initial_value: 'true'
 
 # ---------------------------------------------------------------------
 # Scripts — re-usable action bundles
@@ -464,6 +482,7 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
     on_turn_off:
+      - lambda: 'id(web_auth_persisted) = false;'
       - if:
           condition:
             lambda: 'return id(boot_settled);'
@@ -474,6 +493,7 @@ switch:
             - delay: 3s
             - lambda: 'App.safe_reboot();'
     on_turn_on:
+      - lambda: 'id(web_auth_persisted) = true;'
       - if:
           condition:
             lambda: 'return id(boot_settled);'

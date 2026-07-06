@@ -8,7 +8,19 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 ## Unreleased
 
-_Nothing yet._
+### Fixed
+
+- **`Web UI Auth Required` switch now actually gates the Web UI.** The
+  v2026.07.2 implementation read the switch's `.state` from the
+  priority-800 `on_boot` handler, but ESPHome's template switches
+  restore their persisted state inside `setup()` — scheduled *after*
+  priority-800 on_boot — so the branch always saw `false` and blanked
+  the credentials before `web_server` installed its auth middleware.
+  Fixed by mirroring the switch into a `restore_value: yes` global
+  (`web_auth_persisted`), which `ESPPreferences` restores *before* any
+  component `setup()` runs. The switch's `on_turn_on` / `on_turn_off`
+  handlers keep the mirror in sync with the user's choice.
+  ([#1](https://github.com/de-sascha/AirQuality/issues/1))
 
 ## v2026.07.2 — 2026-07-06 — Display, offset, Web-UI groups, boot-loop fix
 
