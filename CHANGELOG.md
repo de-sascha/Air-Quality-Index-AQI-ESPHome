@@ -8,6 +8,13 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 ## Unreleased
 
+_Nothing yet._
+
+## v2026.07.3 — 2026-07-06 — Web-UI Auth Required switch removed
+
+Bugfix release. Reflash recommended for users on v2026.07.2. No
+pin-out or AQI-threshold changes; no `secrets.yaml` schema change.
+
 ### Removed
 
 - **`Web UI Auth Required` runtime switch.** Removed the entity added
