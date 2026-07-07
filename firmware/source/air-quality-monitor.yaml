@@ -850,7 +850,7 @@ number:
     initial_value: 4.0
     optimistic: true
     restore_value: true
-    mode: box
+    mode: auto
     on_value:
       - script.execute: apply_temperature_offset
 

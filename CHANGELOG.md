@@ -10,6 +10,23 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
+## v2026.07.7 — 2026-07-07 — Temperature Offset accepts fine-grained input
+
+Web-UI usability patch. No functional change on the sensor side,
+no reflash required unless the coarse Offset slider was blocking you.
+
+### Fixed
+
+- **`Temperature Offset` is now a type-in text field in the Web UI.**
+  Previously `mode: box` — which on a 0..20 range with step 0.1
+  rendered as a slider with grid snap in Web-UI v3, so precise
+  offsets like 9.5 or 9.48 could not be entered from the browser
+  (even though the sensor itself and the number entity accepted
+  them via API). Changed to `mode: auto`, which now shows a
+  keyboard-editable text field on desktop and mobile browsers.
+  Discovered when the maintainer tried to dial in a real-world
+  offset against a reference thermometer.
+
 ## v2026.07.6 — 2026-07-07 — Saner defaults on fresh devices
 
 Companion to v2026.07.5. Adds two default-value adjustments that
