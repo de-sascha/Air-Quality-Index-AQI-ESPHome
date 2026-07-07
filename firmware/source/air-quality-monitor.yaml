@@ -908,7 +908,7 @@ number:
     initial_value: 420
     optimistic: true
     restore_value: true
-    mode: box
+    mode: auto
 
 # ---------------------------------------------------------------------
 # Datetime entities — night-mode window
