@@ -850,7 +850,7 @@ number:
     initial_value: 4.0
     optimistic: true
     restore_value: true
-    mode: auto
+    mode: box
     on_value:
       - script.execute: apply_temperature_offset
 
@@ -908,7 +908,7 @@ number:
     initial_value: 420
     optimistic: true
     restore_value: true
-    mode: auto
+    mode: box
 
 # ---------------------------------------------------------------------
 # Datetime entities — night-mode window
