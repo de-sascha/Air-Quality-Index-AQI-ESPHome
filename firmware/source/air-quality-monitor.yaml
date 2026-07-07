@@ -585,7 +585,7 @@ switch:
     id: night_mode_enabled
     icon: mdi:weather-night
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_DEFAULT_OFF
     on_turn_on:
       - script.execute: reevaluate_night_mode
     on_turn_off:
@@ -815,7 +815,7 @@ number:
     min_value: 0
     max_value: 100
     step: 5
-    initial_value: 100
+    initial_value: 50
     optimistic: true
     restore_value: true
     mode: slider
