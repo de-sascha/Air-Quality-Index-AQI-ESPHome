@@ -610,7 +610,7 @@ switch:
     name: "Auto Calibration (ASC)"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 95
+      sorting_weight: 65
     id: scd41_asc_enabled
     icon: mdi:auto-fix
     optimistic: true
@@ -728,35 +728,10 @@ button:
     name: "Save Offset to Sensor EEPROM"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 50
+      sorting_weight: 70
     id: btn_persist_scd41
     icon: mdi:content-save-cog
     on_press:
-      - script.execute: apply_temperature_offset
-      - delay: 1s
-      - script.execute: persist_scd41_settings
-
-  # Restore the Sensirion factory calibration: sets the offset back to
-  # 4.0 °C (the shipped default) both in our NVS-persisted number
-  # entity and in the SCD41's EEPROM. After pressing this, the sensor
-  # is indistinguishable from a freshly unboxed part with respect to
-  # temperature calibration. Uses the same EEPROM write as the save
-  # button above — same ~2000 cycle budget applies.
-  - platform: template
-    name: "Reset Offset to Factory (4 °C)"
-    web_server:
-      sorting_group_id: grp_sensor_scd41
-      sorting_weight: 60
-    id: btn_reset_scd41_offset
-    icon: mdi:factory
-    on_press:
-      - logger.log: "Resetting SCD41 temperature offset to factory default (4.0 °C)"
-      - number.set:
-          id: temperature_offset
-          value: 4.0
-      # Give the number entity a beat to publish its new state before
-      # the apply script reads it back.
-      - delay: 500ms
       - script.execute: apply_temperature_offset
       - delay: 1s
       - script.execute: persist_scd41_settings
@@ -788,7 +763,7 @@ button:
     name: "Force Recalibration Now"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 100
+      sorting_weight: 75
     id: btn_frc_now
     icon: mdi:target-variant
     on_press:
@@ -814,7 +789,7 @@ button:
     name: "Reset Sensor Calibration"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 110
+      sorting_weight: 80
     id: btn_reset_sensor_calibration
     icon: mdi:restore
     on_press:
@@ -865,7 +840,7 @@ number:
     name: "Temperature Offset"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 40
+      sorting_weight: 50
     id: temperature_offset
     icon: mdi:thermometer-minus
     unit_of_measurement: "°C"
@@ -898,7 +873,7 @@ number:
     name: "Altitude (m)"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 42
+      sorting_weight: 55
     id: sensor_altitude
     icon: mdi:image-filter-hdr
     unit_of_measurement: "m"
@@ -923,7 +898,7 @@ number:
     name: "Reference CO2 (ppm)"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 90
+      sorting_weight: 60
     id: co2_reference
     icon: mdi:target
     unit_of_measurement: "ppm"
@@ -1467,7 +1442,7 @@ sensor:
     name: "AQI CO2 Score"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 70
+      sorting_weight: 40
     id: aqi_co2
     update_interval: 30s
     lambda: |-
@@ -1515,7 +1490,7 @@ sensor:
     name: "AQI Humidity Score"
     web_server:
       sorting_group_id: grp_sensor_scd41
-      sorting_weight: 80
+      sorting_weight: 45
     id: aqi_hum
     update_interval: 30s
     lambda: |-
