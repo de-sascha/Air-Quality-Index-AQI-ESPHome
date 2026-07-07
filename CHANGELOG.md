@@ -62,6 +62,37 @@ month. Example: `v2026.07.0` is the first release of July 2026,
   settings are NOT touched — use "Factory Reset" in the System
   group for a full wipe.
 
+### Changed
+
+- **Particle-count unit label is `pcs/0.1L`** (previously ESPHome's
+  default `/dL`). Both notations describe the same quantity — the
+  Plantower manual defines it as "number of particles with diameter
+  beyond X µm in 0.1 L of air" — but `dL` is a chemistry/medical
+  unit (mg/dL for blood glucose) that reads out of place in a
+  particulate-matter context. Overridden per entity via
+  `unit_of_measurement`.
+- **Sensor (SCD41) group is reordered** so related entities sit
+  together: raw values (CO₂, room temp, humidity) → derived AQI
+  scores → calibration settings (offset, altitude, reference CO₂,
+  ASC) → action buttons (save, FRC, reset). Matches the pattern of
+  the Sensor (PMS5003) group.
+- **Sensor (PMS5003) group is reordered** so the six particle-count
+  entities sit immediately after the three mass concentrations,
+  followed by AQI scores, then controls, then the interpretation.
+
+### Removed
+
+- **`Reset Offset to Factory (4 °C)` button.** Redundant with the
+  new `Reset Sensor Calibration` button, which also restores the
+  temperature offset to 4 °C along with altitude, ASC, and reference
+  CO₂. Two overlapping "reset" buttons in the same group were
+  confusing; the more thorough action is the safer default.
+
+  **Home-Assistant impact:** the entity
+  `button.reset_offset_to_factory_4_c` is gone. Any automation
+  referencing it should be updated to
+  `button.reset_sensor_calibration`.
+
 ### Internal
 
 - New `apply_sensor_altitude` and `apply_asc_setting` scripts follow
