@@ -95,18 +95,22 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 ### Fixed
 
-- **Air-quality warnings now track reality within 10–20 s.** The
-  three template text sensors that summarise the AQI into
-  user-facing text (Air Quality Verdict, Air Quality Action, Dust
-  Action) had `update_interval` values of 30 s / 30 s / 60 s.
-  Combined with the AQI score sensors' own 60 s intervals, the
-  worst-case latency for the text to catch up with a real air
-  event was up to 2 minutes — during a candle test the sensor
-  correctly reported PM 2.5 = 434 µg/m³ and AQI = 4 within
-  seconds, but "Dust Action" still read "alles sauber". Dropped
-  all three to `update_interval: 10s`. The template lambdas are
-  pure reads over already-published state, so this is essentially
-  free.
+- **Air-quality scores and warning texts now track reality within
+  10-20 s.** Both the five AQI score sensors (CO₂, PM2.5, PM10,
+  Humidity, Overall) and the three template text sensors that
+  summarise them (Air Quality Verdict, Air Quality Action, Dust
+  Action) previously had `update_interval` values of 30-60 s. The
+  lambdas are pure reads over already-published state, so this cost
+  practically nothing, but it caused a visible UX bug during a
+  rapid air-quality change: during a candle test the Web-UI could
+  simultaneously show PM 10.0 = 137 µg/m³ (class 3, threshold <150)
+  next to `AQI PM10 Score = 4`, or PM 2.5 = 434 µg/m³ next to
+  `Dust Action = "alles sauber"`, because the derived values were
+  frozen from an earlier 60 s cycle. Ticking all eight sensors at
+  10 s keeps the score in step with the underlying sensor's own
+  update (30 s SCD41 / 60 s PMS5003), and keeps the text in step
+  with the score, so a real air-quality change propagates through
+  all three layers within one full 10 s tick.
 
 ### Internal
 
