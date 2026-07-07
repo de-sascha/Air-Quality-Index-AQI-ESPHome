@@ -10,6 +10,33 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
+## v2026.07.9 — 2026-07-07 — Revert v2026.07.7 + v2026.07.8 mode change
+
+Correction release. Two prior patches (v2026.07.7 and v2026.07.8)
+tried to fix a "slider instead of text field" issue by changing
+Temperature Offset and Reference CO2 from `mode: box` to
+`mode: auto`. That analysis was **wrong** — Web-UI v3 renders
+`mode: auto` as a slider and `mode: box` as the typeable text
+field we actually wanted. The Altitude entity (which had been
+`mode: box` all along) was rendering correctly as a text field the
+whole time; that should have been the clue.
+
+Live-verified via a maintainer screenshot: after this revert, all
+three number entities (Temperature Offset, Altitude, Reference
+CO2) show a typeable text field with the current value editable
+directly, not a slider.
+
+### Fixed
+
+- **`Temperature Offset` and `Reference CO2 (ppm)` back to
+  `mode: box`.** Effectively reverts the mode changes from
+  v2026.07.7 and v2026.07.8. Both now render as typeable text
+  fields in the Web UI, matching Altitude's behaviour. Text-field
+  input is what users need for precise calibration values.
+
+Docs from v2026.07.8 (the bilingual user manual under `docs/`)
+remain in place — those were unrelated to the mode issue.
+
 ## v2026.07.8 — 2026-07-07 — User manual + Reference CO2 typeable
 
 Documentation release plus one small Web-UI fix.
