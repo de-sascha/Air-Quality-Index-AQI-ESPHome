@@ -10,21 +10,17 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
-## v2026.07.5 — 2026-07-07 — ESPHome 2026.7 forward-compat + defaults
+## v2026.07.6 — 2026-07-07 — Saner defaults on fresh devices
 
-Compile-compatibility patch + default value adjustments.
-No reflash required unless upgrading ESPHome to 2026.7.0 or later,
-or if you want the new defaults on a fresh device.
+Companion to v2026.07.5. Adds two default-value adjustments that
+were discovered during the v2026.07.5 release simulation but only
+verified live afterwards. No reflash required unless you want the
+new defaults on a fresh device.
 
-### Fixed
-
-- **`Select::state` deprecated API replaced.** All lambdas reading
-  `id(ui_language)` or `id(display_rotation)` used the deprecated
-  `Select::state` accessor, which ESPHome 2026.7.0 removes entirely.
-  Replaced all 10 occurrences with `current_option()` — identical
-  return type (`std::string`), no logic change. Discovered during a
-  new-user compile simulation: the warning appeared on every compile
-  but had not previously been noticed.
+The v2026.07.5 tag was pushed prematurely against a commit that
+only contained the `Select::state` compat fix — the default changes
+below landed slightly later and got a fresh tag rather than
+overwriting a public one.
 
 ### Changed
 
@@ -39,6 +35,21 @@ or if you want the new defaults on a fresh device.
   new devices to appear to have a broken display for users who
   hadn't noticed or configured the time window. Only affects
   first-boot / factory reset.
+
+## v2026.07.5 — 2026-07-07 — ESPHome 2026.7 forward-compat fix
+
+Compile-compatibility patch. No functional change; no reflash required
+unless you are upgrading ESPHome to 2026.7.0 or later.
+
+### Fixed
+
+- **`Select::state` deprecated API replaced.** All lambdas reading
+  `id(ui_language)` or `id(display_rotation)` used the deprecated
+  `Select::state` accessor, which ESPHome 2026.7.0 removes entirely.
+  Replaced all 10 occurrences with `current_option()` — identical
+  return type (`std::string`), no logic change. Discovered during a
+  new-user compile simulation: the warning appeared on every compile
+  but had not previously been noticed.
 
 ## v2026.07.4 — 2026-07-07 — Sensor deep-dive: particle counts, FRC, ASC, altitude, calibration reset
 
