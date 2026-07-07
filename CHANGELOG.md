@@ -8,6 +8,16 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 ## Unreleased
 
+_Nothing yet._
+
+## v2026.07.4 — 2026-07-07 — Sensor deep-dive: particle counts, FRC, ASC, altitude, calibration reset
+
+Feature + fix release. Reflash recommended. No pin-out or
+AQI-threshold changes; no `secrets.yaml` schema change. One
+Home-Assistant-visible entity was removed (see "Removed" below) —
+if you have an automation on `button.reset_offset_to_factory_4_c`,
+point it at `button.reset_sensor_calibration` instead.
+
 ### Added
 
 - **PMS5003 particle-count bins.** Six new sensor entities in the
