@@ -65,6 +65,15 @@ esphome:
         - script.execute: apply_display_settings
         - delay: 500ms
         - script.execute: apply_temperature_offset
+        # Re-push altitude + ASC into the sensor. Both are volatile
+        # in SCD41 RAM unless persist_settings has been called, so
+        # after a power cycle they'd be at factory defaults inside
+        # the sensor even though NVS has the user's values. Order:
+        # each helper stops/starts periodic measurement, so serialise.
+        - delay: 1s
+        - script.execute: apply_sensor_altitude
+        - delay: 1s
+        - script.execute: apply_asc_setting
 
 # ---------------------------------------------------------------------
 # Globals — persisted state read by the display + sensor scripts.
@@ -207,6 +216,164 @@ script:
             - lambda: 'id(scd41)->write_command((uint16_t) 0x3615);'
             - delay: 800ms
             - lambda: 'id(scd41)->write_command((uint16_t) 0x21B1);'
+
+  # Push a new altitude into the SCD41 via set_sensor_altitude (0x2427).
+  # The datasheet (Section 3.6.3) states the value is a u16 in metres.
+  # Only writable in idle state, so the same stop -> write -> start
+  # sequence as apply_temperature_offset. 1 ms max command duration
+  # per Table 15 — we keep the 500 ms stop delay from the datasheet.
+  # Volatile in the sensor's RAM only; NVS on the ESP re-pushes on
+  # boot, so a power cycle without an EEPROM save still ends up with
+  # the user's value.
+  - id: apply_sensor_altitude
+    then:
+      - if:
+          condition:
+            lambda: 'return id(boot_settled);'
+          then:
+            - lambda: |-
+                float alt_f = id(sensor_altitude).state;
+                if (alt_f < 0)    alt_f = 0;
+                if (alt_f > 3000) alt_f = 3000;
+                uint16_t alt = (uint16_t) alt_f;
+                ESP_LOGI("scd41", "Applying sensor altitude: %u m", alt);
+                id(scd41)->write_command((uint16_t) 0x3F86);
+            - delay: 500ms
+            - lambda: |-
+                float alt_f = id(sensor_altitude).state;
+                if (alt_f < 0)    alt_f = 0;
+                if (alt_f > 3000) alt_f = 3000;
+                uint16_t alt = (uint16_t) alt_f;
+                id(scd41)->write_command((uint16_t) 0x2427, alt);
+            - delay: 10ms
+            - lambda: 'id(scd41)->write_command((uint16_t) 0x21B1);'
+
+  # Push the ASC-enabled state into the SCD41 via
+  # set_automatic_self_calibration_enabled (0x2416). Datasheet Section
+  # 3.7.2: word[0] = 1 -> ASC enabled, 0 -> disabled; command duration
+  # max 1 ms. Only writable in idle. The setting is volatile in RAM
+  # only — persist_settings must be called to write it to EEPROM. We
+  # do NOT auto-persist here (spare the EEPROM); the "Save Offset to
+  # Sensor EEPROM" button covers that case since persist_settings
+  # writes ALL config regs at once. NVS-side we always know the user's
+  # choice and re-push on every boot.
+  - id: apply_asc_setting
+    then:
+      - if:
+          condition:
+            lambda: 'return id(boot_settled);'
+          then:
+            - lambda: |-
+                bool asc = id(scd41_asc_enabled).state;
+                ESP_LOGI("scd41", "Applying ASC: %s", asc ? "enabled" : "disabled");
+                id(scd41)->write_command((uint16_t) 0x3F86);
+            - delay: 500ms
+            - lambda: |-
+                uint16_t v = id(scd41_asc_enabled).state ? 1 : 0;
+                id(scd41)->write_command((uint16_t) 0x2416, v);
+            - delay: 10ms
+            - lambda: 'id(scd41)->write_command((uint16_t) 0x21B1);'
+
+  # Forced recalibration. Datasheet Section 3.7.1 prescribes:
+  #   1. Sensor must have been operated in the target mode (here:
+  #      periodic_measurement) for at least 3 MINUTES in a homogenous,
+  #      constant CO2 environment. FRC on a freshly-powered sensor
+  #      returns 0xFFFF (failure).
+  #   2. stop_periodic_measurement (0x3F86), wait 500 ms.
+  #   3. perform_forced_recalibration (0x362F) with u16 target ppm +
+  #      CRC. Wait 400 ms for the command to complete. Optionally read
+  #      3 bytes back: word[0] = FRC correction + 0x8000, or 0xFFFF on
+  #      failure. We do not currently consume the result (would need
+  #      a read+CRC-check; ESPHome's Sensirion helper does not expose
+  #      a paired read for this). The user re-observes the CO2 value
+  #      settling to their reference within a few minutes as the
+  #      success signal.
+  #   4. start_periodic_measurement (0x21B1).
+  #
+  # We deliberately do NOT wrap this in a boot_settled gate that
+  # blocks — the button is user-triggered and only reachable via the
+  # Web UI, which is not up until boot has fully settled anyway. But
+  # we still check, cheap.
+  - id: perform_frc
+    then:
+      - if:
+          condition:
+            lambda: 'return id(boot_settled);'
+          then:
+            - lambda: |-
+                float ref_f = id(co2_reference).state;
+                if (ref_f < 400)  ref_f = 400;
+                if (ref_f > 2000) ref_f = 2000;
+                uint16_t ref = (uint16_t) ref_f;
+                ESP_LOGI("scd41", "Starting FRC against reference %u ppm — sensor must have been running >=3 min for this to succeed", ref);
+                id(scd41)->write_command((uint16_t) 0x3F86);
+            - delay: 500ms
+            - lambda: |-
+                float ref_f = id(co2_reference).state;
+                if (ref_f < 400)  ref_f = 400;
+                if (ref_f > 2000) ref_f = 2000;
+                uint16_t ref = (uint16_t) ref_f;
+                id(scd41)->write_command((uint16_t) 0x362F, ref);
+            # Datasheet: command takes 400 ms to complete. Sensor is
+            # unresponsive during that window; do NOT talk to it.
+            - delay: 400ms
+            - lambda: |-
+                ESP_LOGI("scd41", "FRC issued; resuming periodic measurement");
+                id(scd41)->write_command((uint16_t) 0x21B1);
+
+  # Full sensor-calibration reset. Issues perform_factory_reset
+  # (0x3632) which erases the SCD41's EEPROM entirely, then resets
+  # our four ESP-side calibration entities to Sensirion's factory
+  # defaults and re-pushes them into the (now blanked) sensor so the
+  # user sees the "as new" state without a reboot.
+  #
+  # Datasheet Section 3.9.2: perform_factory_reset takes up to 1200 ms
+  # and requires the sensor to be in idle. Sequence:
+  #   - stop_periodic_measurement, wait 500 ms
+  #   - perform_factory_reset,     wait 1200 ms  (sensor unresponsive)
+  #   - start_periodic_measurement
+  #   - then re-push offset/altitude/ASC so the RAM state matches the
+  #     ESP-side entities (all now at defaults).
+  - id: reset_sensor_calibration
+    then:
+      - if:
+          condition:
+            lambda: 'return id(boot_settled);'
+          then:
+            - logger.log: "Reset Sensor Calibration: resetting all SCD41 calibration to factory defaults"
+            # Restore the ESP-side entities to Sensirion factory
+            # values first so the subsequent re-push writes defaults
+            # into the freshly-blanked sensor.
+            - number.set:
+                id: temperature_offset
+                value: 4.0
+            - number.set:
+                id: sensor_altitude
+                value: 0
+            - number.set:
+                id: co2_reference
+                value: 420
+            - switch.turn_on: scd41_asc_enabled
+            # Give the number/switch state-restore a beat to publish
+            # before we start driving the sensor.
+            - delay: 300ms
+            - lambda: 'id(scd41)->write_command((uint16_t) 0x3F86);'
+            - delay: 500ms
+            - lambda: |-
+                ESP_LOGI("scd41", "Issuing perform_factory_reset (0x3632) — sensor unresponsive for ~1.2 s");
+                id(scd41)->write_command((uint16_t) 0x3632);
+            - delay: 1200ms
+            - lambda: 'id(scd41)->write_command((uint16_t) 0x21B1);'
+            # Re-push the (now-defaulted) ESP-side values into the
+            # blanked sensor. Each helper does its own stop/start
+            # cycle, which is fine — the sensor is back in periodic
+            # mode by now.
+            - delay: 500ms
+            - script.execute: apply_temperature_offset
+            - delay: 1s
+            - script.execute: apply_sensor_altitude
+            - delay: 1s
+            - script.execute: apply_asc_setting
 
   # Re-usable night-window evaluator. Called from the 60 s interval
   # AND from every user-facing trigger that changes the window
@@ -424,6 +591,35 @@ switch:
     on_turn_off:
       - script.execute: reevaluate_night_mode
 
+  # SCD41 Automatic Self-Calibration (ASC). When on (the factory
+  # default), the sensor treats the LOWEST CO2 value it has seen in a
+  # rolling ~7-day window as a fresh-air baseline of 400 ppm and
+  # re-anchors its zero point against it. Great for rooms that get
+  # aired daily. In rooms that never see fresh air (a rarely-ventilated
+  # bedroom, an office over a long weekend), ASC picks the wrong
+  # minimum and permanently under-reads. In that case the user should
+  # turn ASC OFF and use "Force Recalibration Now" instead.
+  #
+  # Command 0x2416 = set_automatic_self_calibration_enabled (0 or 1),
+  # only accepted in idle. Persisted in NVS so the choice survives a
+  # reboot; the on_turn_* handlers re-push into the sensor after every
+  # change. The value is ALSO written into the SCD41 EEPROM by the
+  # "Save Offset to Sensor EEPROM" button below, since we call
+  # persist_settings there and that command writes ALL config regs.
+  - platform: template
+    name: "Auto Calibration (ASC)"
+    web_server:
+      sorting_group_id: grp_sensor_scd41
+      sorting_weight: 95
+    id: scd41_asc_enabled
+    icon: mdi:auto-fix
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: apply_asc_setting
+    on_turn_off:
+      - script.execute: apply_asc_setting
+
 # ---------------------------------------------------------------------
 # Buttons — appear as clickable cards in both Web UI and Home Assistant.
 # Standard ESPHome `button:` platform; each button becomes a HA
@@ -565,6 +761,65 @@ button:
       - delay: 1s
       - script.execute: persist_scd41_settings
 
+  # Forced Recalibration (FRC). Tells the SCD41: "the true CO2 in the
+  # air you are breathing RIGHT NOW is <Reference CO2> ppm — correct
+  # your zero point accordingly." The typical ritual is:
+  #
+  #   1. Take the device outside (shady spot, no idling cars nearby)
+  #      or into a thoroughly aired room, and let it stabilise for a
+  #      few minutes. The SCD41 needs ~3 min after a step change in
+  #      CO2 before the reported value fully tracks the environment.
+  #   2. Confirm the "Reference CO2" number entity matches what you
+  #      believe the true CO2 is (2026 global outdoor baseline is
+  #      ~420 ppm).
+  #   3. Click this button.
+  #
+  # Command sequence per Sensirion SCD4x datasheet:
+  #   - stop_periodic_measurement (0x3F86), wait 500 ms
+  #   - perform_forced_recalibration (0x362F + u16 ref + CRC),
+  #     sensor takes ~400 ms to compute and returns a signed 16-bit
+  #     correction ("FRC correction" = new_offset - old_offset). We
+  #     don't consume the result here (would need a read after the
+  #     command) — we just trust the write succeeded and log it.
+  #   - start_periodic_measurement (0x21B1)
+  #
+  # Only fires when boot_settled, same as the other SCD41 scripts.
+  - platform: template
+    name: "Force Recalibration Now"
+    web_server:
+      sorting_group_id: grp_sensor_scd41
+      sorting_weight: 100
+    id: btn_frc_now
+    icon: mdi:target-variant
+    on_press:
+      - script.execute: perform_frc
+
+  # Full sensor-calibration reset. Restores every SCD41 calibration
+  # register (temperature offset, ASC enable, altitude) to Sensirion's
+  # factory defaults, resets the "Reference CO2" number entity to 420
+  # ppm, and issues perform_factory_reset (0x3632) which wipes the
+  # SCD41's internal EEPROM. After this button, the sensor's on-chip
+  # state is indistinguishable from a freshly unboxed part.
+  #
+  # NOT touched: room-air Wi-Fi credentials, night mode, display
+  # settings — those live in ESP NVS and are not sensor-related. Use
+  # "Factory Reset" in the System group for a full wipe.
+  #
+  # Because this issues a hard-reset command to the SCD41, it takes
+  # about 1.2 s during which the sensor is unresponsive. We keep
+  # periodic measurement stopped during the reset and restart it
+  # afterwards, then re-push the (now-defaulted) offset / altitude /
+  # ASC so the ESP-side values match the sensor-side values.
+  - platform: template
+    name: "Reset Sensor Calibration"
+    web_server:
+      sorting_group_id: grp_sensor_scd41
+      sorting_weight: 110
+    id: btn_reset_sensor_calibration
+    icon: mdi:restore
+    on_press:
+      - script.execute: reset_sensor_calibration
+
 # ---------------------------------------------------------------------
 # Number entities — user-tunable analog settings
 # ---------------------------------------------------------------------
@@ -623,6 +878,62 @@ number:
     mode: box
     on_value:
       - script.execute: apply_temperature_offset
+
+  # SCD41 altitude compensation. CO2 measured by NDIR is
+  # pressure-dependent — fewer air molecules in the measurement chamber
+  # mean fewer absorption events, so the sensor under-reads at altitude
+  # unless corrected. Sensirion's `set_sensor_altitude` (0x2427) takes
+  # a value in metres above sea level and applies a standard-atmosphere
+  # correction internally.
+  #
+  # Rough magnitude of the uncompensated error:
+  #   500 m  ->  ~1.5 %
+  #  1000 m  ->  ~3   %
+  #  2000 m  ->  ~6   %
+  #
+  # Default 0 m means "sea level, do nothing" — safe for the common
+  # case (northern-German lowlands). Users at real altitude enter their
+  # value once, gets persisted in NVS, re-applied on every boot.
+  - platform: template
+    name: "Altitude (m)"
+    web_server:
+      sorting_group_id: grp_sensor_scd41
+      sorting_weight: 42
+    id: sensor_altitude
+    icon: mdi:image-filter-hdr
+    unit_of_measurement: "m"
+    min_value: 0
+    max_value: 3000
+    step: 10
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    mode: box
+    on_value:
+      - script.execute: apply_sensor_altitude
+
+  # Reference CO2 value for the "Force Recalibration Now" button.
+  # 420 ppm is the current global outdoor baseline (2026). Range
+  # 400..1000 lets a user recalibrate against a room they have just
+  # aired thoroughly if going outside is impractical — the important
+  # thing is that this value MATCHES the true CO2 of the air the
+  # sensor is currently breathing. Persists in NVS so the next click
+  # picks the same reference.
+  - platform: template
+    name: "Reference CO2 (ppm)"
+    web_server:
+      sorting_group_id: grp_sensor_scd41
+      sorting_weight: 90
+    id: co2_reference
+    icon: mdi:target
+    unit_of_measurement: "ppm"
+    min_value: 400
+    max_value: 1000
+    step: 5
+    initial_value: 420
+    optimistic: true
+    restore_value: true
+    mode: box
 
 # ---------------------------------------------------------------------
 # Datetime entities — night-mode window
@@ -1079,6 +1390,49 @@ sensor:
         sorting_group_id: grp_sensor_pms5003
         sorting_weight: 30
       id: sens_pm_10_0
+    # Particle-count bins — same 32-byte UART frame carries these
+    # alongside the mass concentrations, so surfacing them costs no
+    # extra bus traffic. Unit is "particles per 0.1 L air", per the
+    # Plantower manual. The smallest bins (0.3 / 0.5 µm) are the most
+    # health-relevant: alveoli-penetrating and under-represented by
+    # the µg/m³ view, since a single 10-µm grain weighs as much as
+    # ~40 000 particles at 0.3 µm.
+    pm_0_3um:
+      name: "Particles > 0.3 µm"
+      web_server:
+        sorting_group_id: grp_sensor_pms5003
+        sorting_weight: 11
+      id: sens_pc_0_3
+    pm_0_5um:
+      name: "Particles > 0.5 µm"
+      web_server:
+        sorting_group_id: grp_sensor_pms5003
+        sorting_weight: 12
+      id: sens_pc_0_5
+    pm_1_0um:
+      name: "Particles > 1.0 µm"
+      web_server:
+        sorting_group_id: grp_sensor_pms5003
+        sorting_weight: 13
+      id: sens_pc_1_0
+    pm_2_5um:
+      name: "Particles > 2.5 µm"
+      web_server:
+        sorting_group_id: grp_sensor_pms5003
+        sorting_weight: 14
+      id: sens_pc_2_5
+    pm_5_0um:
+      name: "Particles > 5.0 µm"
+      web_server:
+        sorting_group_id: grp_sensor_pms5003
+        sorting_weight: 15
+      id: sens_pc_5_0
+    pm_10_0um:
+      name: "Particles > 10 µm"
+      web_server:
+        sorting_group_id: grp_sensor_pms5003
+        sorting_weight: 16
+      id: sens_pc_10_0
 
   # AQI category scores (0..4, one per pollutant).
   # 0 = excellent, 1 = good, 2 = moderate, 3 = poor, 4 = critical.

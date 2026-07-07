@@ -8,7 +8,79 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 ## Unreleased
 
-_Nothing yet._
+### Added
+
+- **PMS5003 particle-count bins.** Six new sensor entities in the
+  "Sensor (PMS5003)" group: `Particles > 0.3 µm`, `> 0.5 µm`,
+  `> 1.0 µm`, `> 2.5 µm`, `> 5.0 µm`, `> 10 µm`. Unit is "particles
+  per 0.1 L of air" as defined in the Plantower manual (Data7..Data12
+  in the 32-byte UART frame). The two smallest bins are the most
+  health-relevant — sub-µm particles are alveoli-penetrating and are
+  under-represented by the µg/m³ mass concentrations that the AQI
+  score already uses. No extra bus traffic; the sensor sends these
+  values in the same frame we were already parsing.
+- **SCD41 Automatic Self-Calibration (ASC) toggle.** New `Auto
+  Calibration (ASC)` switch in the "Sensor (SCD41)" group, default
+  ON (Sensirion factory default). ASC anchors the sensor's zero
+  point against the lowest CO₂ value seen in a rolling ~7-day
+  window on the assumption that value corresponds to 400 ppm fresh
+  air. Users in rooms that never see fresh air (rarely-ventilated
+  bedrooms, weekend-empty offices) should turn ASC OFF — else the
+  algorithm re-anchors against an elevated baseline and permanently
+  under-reads. Setting persists in NVS on the ESP and is re-pushed
+  into the sensor on every boot; also written to sensor EEPROM
+  whenever "Save Offset to Sensor EEPROM" is clicked.
+  ESPHome command: `set_automatic_self_calibration_enabled` (0x2416)
+  per SCD4x datasheet Section 3.7.2.
+- **SCD41 Forced Recalibration.** New `Reference CO2 (ppm)` number
+  entity (range 400..1000, default 420 = 2026 global outdoor
+  baseline) and `Force Recalibration Now` button. Datasheet-correct
+  sequence: stop periodic measurement → wait 500 ms →
+  `perform_forced_recalibration` (0x362F) with the reference value
+  as a u16 → wait 400 ms → restart periodic measurement. Per SCD4x
+  datasheet Section 3.7.1, the sensor must have been running in
+  periodic mode for at least 3 minutes in a homogeneous CO₂
+  environment before this succeeds; otherwise the sensor returns
+  0xFFFF (failure). Typical use: take device outside, wait 3-5 min,
+  click the button. Complements ASC and is the correct fix when ASC
+  cannot see fresh air.
+- **SCD41 altitude compensation.** New `Altitude (m)` number entity
+  (range 0..3000, step 10, default 0). NDIR CO₂ measurement is
+  pressure-dependent — at 1000 m altitude the uncompensated value
+  under-reads by ~3 %. The value is pushed into the sensor via
+  `set_sensor_altitude` (0x2427) as a u16 in metres per SCD4x
+  datasheet Section 3.6.3. Persists in NVS, re-pushed on every boot,
+  and cleared by the new "Reset Sensor Calibration" button below.
+- **Reset Sensor Calibration** button (SCD41 group). Issues
+  `perform_factory_reset` (0x3632, ~1200 ms per datasheet Section
+  3.9.2) which wipes the SCD41's on-chip EEPROM entirely, then
+  resets our four ESP-side calibration entities to Sensirion
+  defaults (temperature offset 4.0 °C, altitude 0 m, ASC on,
+  reference CO₂ 420 ppm) and re-pushes them into the blanked
+  sensor. After this button, the SCD41 is indistinguishable from a
+  freshly unboxed part. Wi-Fi credentials, night mode, and display
+  settings are NOT touched — use "Factory Reset" in the System
+  group for a full wipe.
+
+### Internal
+
+- New `apply_sensor_altitude` and `apply_asc_setting` scripts follow
+  the same stop → command → restart pattern as
+  `apply_temperature_offset`. All datasheet-mandated delays
+  (500 ms after stop, 400 ms after FRC, 1200 ms after factory
+  reset) are honoured explicitly.
+- The `on_boot` (priority -100) handler now re-pushes altitude and
+  ASC into the sensor after the 10 s settle window, in addition to
+  the existing temperature-offset push, so a power cycle without
+  an EEPROM save still ends up in the user-configured state.
+- All command codes, timings, and encodings are verified against
+  the Sensirion SCD4x datasheet
+  (`docs/datasheets/sensirion-scd4x.pdf`, Sections 3.6.3, 3.7.1,
+  3.7.2, 3.9.2). Particle-count entity names are verified against
+  the ESPHome `pmsx003` component (`pm_0_3um`, `pm_0_5um`,
+  `pm_1_0um`, `pm_2_5um`, `pm_5_0um`, `pm_10_0um`), and their
+  semantics ("particles > diameter per 0.1 L air") against the
+  Plantower PMS5003 manual.
 
 ## v2026.07.3 — 2026-07-06 — Web-UI Auth Required switch removed
 
