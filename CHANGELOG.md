@@ -10,6 +10,21 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
+## v2026.07.5 — 2026-07-07 — ESPHome 2026.7 forward-compat fix
+
+Compile-compatibility patch. No functional change; no reflash required
+unless you are upgrading ESPHome to 2026.7.0 or later.
+
+### Fixed
+
+- **`Select::state` deprecated API replaced.** All lambdas reading
+  `id(ui_language)` or `id(display_rotation)` used the deprecated
+  `Select::state` accessor, which ESPHome 2026.7.0 removes entirely.
+  Replaced all 10 occurrences with `current_option()` — identical
+  return type (`std::string`), no logic change. Discovered during a
+  new-user compile simulation: the warning appeared on every compile
+  but had not previously been noticed.
+
 ## v2026.07.4 — 2026-07-07 — Sensor deep-dive: particle counts, FRC, ASC, altitude, calibration reset
 
 Feature + fix release. Reflash recommended. No pin-out or

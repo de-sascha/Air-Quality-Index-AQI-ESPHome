@@ -123,7 +123,7 @@ script:
 
                 // Rotation — the select stores a plain "0" / "90" / "180" /
                 // "270" string. Map to the display component's enum.
-                std::string rot = id(display_rotation).state;
+                std::string rot = id(display_rotation).current_option();
                 DisplayRotation r = DISPLAY_ROTATION_0_DEGREES;
                 if      (rot == "90")  r = DISPLAY_ROTATION_90_DEGREES;
                 else if (rot == "180") r = DISPLAY_ROTATION_180_DEGREES;
@@ -1007,7 +1007,7 @@ select:
 # Text sensors — Wi-Fi info + AQI verdicts
 # ---------------------------------------------------------------------
 # Anywhere a lambda picks a language-specific string, it uses:
-#   id(ui_language).state == "Deutsch"
+#   id(ui_language).current_option() == "Deutsch"
 # German is the alternate; English is the default and the fallback for
 # any state where the select has no value yet (should not happen with
 # initial_option set, but defensive).
@@ -1037,7 +1037,7 @@ text_sensor:
     lambda: |-
       if (!id(aqi_overall).has_state()) return {"..."};
       int s = (int)id(aqi_overall).state;
-      bool de = id(ui_language).state == "Deutsch";
+      bool de = id(ui_language).current_option() == "Deutsch";
       switch(s) {
         case 0: return de ? std::string("TOP")      : std::string("TOP");
         case 1: return de ? std::string("GUT")      : std::string("GOOD");
@@ -1062,7 +1062,7 @@ text_sensor:
     lambda: |-
       if (!id(aqi_overall).has_state()) return {"..."};
       int overall = (int)id(aqi_overall).state;
-      bool de = id(ui_language).state == "Deutsch";
+      bool de = id(ui_language).current_option() == "Deutsch";
       if (overall == 0) return de ? std::string("alles gut") : std::string("all good");
 
       int co2  = id(aqi_co2).has_state()  ? (int)id(aqi_co2).state  : -1;
@@ -1109,7 +1109,7 @@ text_sensor:
       int pm25 = id(aqi_pm25).has_state() ? (int)id(aqi_pm25).state : -1;
       int pm10 = id(aqi_pm10).has_state() ? (int)id(aqi_pm10).state : -1;
       if (pm25 < 0 && pm10 < 0) return {"..."};
-      bool de = id(ui_language).state == "Deutsch";
+      bool de = id(ui_language).current_option() == "Deutsch";
 
       if (pm25 >= pm10) {
         if (pm25 >= 4) return de ? std::string("Reiniger MAX, zu!") : std::string("Purifier MAX, shut!");
@@ -1167,7 +1167,7 @@ text_sensor:
     update_interval: 3600s
     lambda: |-
       esp_reset_reason_t r = esp_reset_reason();
-      bool de = id(ui_language).state == "Deutsch";
+      bool de = id(ui_language).current_option() == "Deutsch";
       switch (r) {
         case ESP_RST_POWERON:   return de ? std::string("Einschalten")        : std::string("Power-On");
         case ESP_RST_SW:        return de ? std::string("Software")           : std::string("Software");
@@ -1593,7 +1593,7 @@ display:
       # Page 1: overall verdict — the most important page.
       - id: page_overall
         lambda: |-
-          bool de = id(ui_language).state == "Deutsch";
+          bool de = id(ui_language).current_option() == "Deutsch";
           it.printf(0, 0, id(font_header), "%s",
                     de ? "LUFTQUALITAET" : "AIR QUALITY");
           it.line(0, 13, 127, 13);
@@ -1630,7 +1630,7 @@ display:
       # Page 2: climate detail — CO2, temperature, humidity.
       - id: page_climate
         lambda: |-
-          bool de = id(ui_language).state == "Deutsch";
+          bool de = id(ui_language).current_option() == "Deutsch";
           it.printf(0, 0, id(font_header), "%s", de ? "Klima" : "Climate");
           it.line(0, 13, 127, 13);
 
@@ -1683,7 +1683,7 @@ display:
       # Page 3: particulate matter detail.
       - id: page_pm
         lambda: |-
-          bool de = id(ui_language).state == "Deutsch";
+          bool de = id(ui_language).current_option() == "Deutsch";
           it.printf(0, 0, id(font_header), "%s",
                     de ? "Feinstaub" : "Particulates");
           it.line(0, 13, 127, 13);
@@ -1744,7 +1744,7 @@ display:
       # Page 4: system status — clock, IP, SSID, RSSI.
       - id: page_system
         lambda: |-
-          bool de = id(ui_language).state == "Deutsch";
+          bool de = id(ui_language).current_option() == "Deutsch";
           it.printf(0, 0, id(font_header), "System");
           it.line(0, 13, 127, 13);
 
