@@ -10,6 +10,60 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
+## v2026.07.9 — 2026-07-07 — Revert v2026.07.7 + v2026.07.8 mode change
+
+Correction release. Two prior patches (v2026.07.7 and v2026.07.8)
+tried to fix a "slider instead of text field" issue by changing
+Temperature Offset and Reference CO2 from `mode: box` to
+`mode: auto`. That analysis was **wrong** — Web-UI v3 renders
+`mode: auto` as a slider and `mode: box` as the typeable text
+field we actually wanted. The Altitude entity (which had been
+`mode: box` all along) was rendering correctly as a text field the
+whole time; that should have been the clue.
+
+Live-verified via a maintainer screenshot: after this revert, all
+three number entities (Temperature Offset, Altitude, Reference
+CO2) show a typeable text field with the current value editable
+directly, not a slider.
+
+### Fixed
+
+- **`Temperature Offset` and `Reference CO2 (ppm)` back to
+  `mode: box`.** Effectively reverts the mode changes from
+  v2026.07.7 and v2026.07.8. Both now render as typeable text
+  fields in the Web UI, matching Altitude's behaviour. Text-field
+  input is what users need for precise calibration values.
+
+Docs from v2026.07.8 (the bilingual user manual under `docs/`)
+remain in place — those were unrelated to the mode issue.
+
+## v2026.07.8 — 2026-07-07 — User manual + Reference CO2 typeable
+
+Documentation release plus one small Web-UI fix.
+
+### Added
+
+- **Full bilingual user manual.** Two new documents in the `docs/`
+  directory: [`docs/manual-de.md`](docs/manual-de.md) and
+  [`docs/manual-en.md`](docs/manual-en.md). Each explains, in
+  plain non-technical language, every reading and every setting in
+  the Web UI: what it measures, what a normal range looks like, when
+  the user would want to change it, and what happens when they do.
+  Also covers the AQI traffic-light system, when and how to
+  calibrate, and a FAQ section for common questions like "why does
+  the sensor show 0 µg/m³?" or "why doesn't my offset change take
+  effect?". Cross-linked from the README and between languages.
+
+### Fixed
+
+- **`Reference CO2 (ppm)` is now a type-in text field in the Web UI.**
+  Same fix as v2026.07.7's Temperature Offset: `mode: box` on a
+  400..1000 range with step 5 was rendering as a slider with grid
+  snap in Web-UI v3. Changed to `mode: auto`, now shows a
+  keyboard-editable number field. Since Reference CO2 is a value
+  users set once (typically 420 for outdoor calibration) and
+  precise entry matters, this is a clearer UX.
+
 ## v2026.07.7 — 2026-07-07 — Temperature Offset accepts fine-grained input
 
 Web-UI usability patch. No functional change on the sensor side,

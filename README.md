@@ -47,6 +47,25 @@ password, none of which are stored in this repository.
   through picking their home Wi-Fi. No home-Wi-Fi credentials are
   baked into the firmware.
 
+## User manual
+
+Once the device is running, every reading and every setting in the
+Web UI and Home Assistant is documented in a plain-language user
+manual — written for people who want to operate the device without
+reading datasheets:
+
+- 🇩🇪 **[Bedienungsanleitung (Deutsch)](docs/manual-de.md)**
+- 🇬🇧 **[User manual (English)](docs/manual-en.md)**
+
+The manual covers the traffic-light system, when and how to calibrate,
+what each control does and when you'd want to change it, plus a FAQ
+section on typical situations ("why is 0 µg/m³ shown when I know
+there's dust in the air?", "the offset doesn't seem to change
+anything", etc.).
+
+For the AQI thresholds and their published-standard sources, see
+[docs/aqi-basis.md](docs/aqi-basis.md).
+
 ## What it looks like
 
 The device rotates through three data pages every 6 seconds. Here they
