@@ -443,6 +443,11 @@ Temperature is intentionally **not scored** because the SCD41 sits inside
 the enclosure and picks up a few degrees of self-heating from the ESP —
 any temperature threshold would misfire.
 
+For the **full rationale** — every threshold with its citation, all
+recommendation texts (in German and English), and the design
+decisions that are not from a standard — see
+[`docs/aqi-basis.md`](docs/aqi-basis.md).
+
 ## Roadmap / contributions welcome
 
 - Prebuilt enclosure STL for 3D printing

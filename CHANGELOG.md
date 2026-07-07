@@ -10,6 +10,146 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
+## v2026.07.4 — 2026-07-07 — Sensor deep-dive: particle counts, FRC, ASC, altitude, calibration reset
+
+Feature + fix release. Reflash recommended. No pin-out or
+AQI-threshold changes; no `secrets.yaml` schema change. One
+Home-Assistant-visible entity was removed (see "Removed" below) —
+if you have an automation on `button.reset_offset_to_factory_4_c`,
+point it at `button.reset_sensor_calibration` instead.
+
+### Added
+
+- **PMS5003 particle-count bins.** Six new sensor entities in the
+  "Sensor (PMS5003)" group: `Particles > 0.3 µm`, `> 0.5 µm`,
+  `> 1.0 µm`, `> 2.5 µm`, `> 5.0 µm`, `> 10 µm`. Unit is "particles
+  per 0.1 L of air" as defined in the Plantower manual (Data7..Data12
+  in the 32-byte UART frame). The two smallest bins are the most
+  health-relevant — sub-µm particles are alveoli-penetrating and are
+  under-represented by the µg/m³ mass concentrations that the AQI
+  score already uses. No extra bus traffic; the sensor sends these
+  values in the same frame we were already parsing.
+- **SCD41 Automatic Self-Calibration (ASC) toggle.** New `Auto
+  Calibration (ASC)` switch in the "Sensor (SCD41)" group, default
+  ON (Sensirion factory default). ASC anchors the sensor's zero
+  point against the lowest CO₂ value seen in a rolling ~7-day
+  window on the assumption that value corresponds to 400 ppm fresh
+  air. Users in rooms that never see fresh air (rarely-ventilated
+  bedrooms, weekend-empty offices) should turn ASC OFF — else the
+  algorithm re-anchors against an elevated baseline and permanently
+  under-reads. Setting persists in NVS on the ESP and is re-pushed
+  into the sensor on every boot; also written to sensor EEPROM
+  whenever "Save Offset to Sensor EEPROM" is clicked.
+  ESPHome command: `set_automatic_self_calibration_enabled` (0x2416)
+  per SCD4x datasheet Section 3.7.2.
+- **SCD41 Forced Recalibration.** New `Reference CO2 (ppm)` number
+  entity (range 400..1000, default 420 = 2026 global outdoor
+  baseline) and `Force Recalibration Now` button. Datasheet-correct
+  sequence: stop periodic measurement → wait 500 ms →
+  `perform_forced_recalibration` (0x362F) with the reference value
+  as a u16 → wait 400 ms → restart periodic measurement. Per SCD4x
+  datasheet Section 3.7.1, the sensor must have been running in
+  periodic mode for at least 3 minutes in a homogeneous CO₂
+  environment before this succeeds; otherwise the sensor returns
+  0xFFFF (failure). Typical use: take device outside, wait 3-5 min,
+  click the button. Complements ASC and is the correct fix when ASC
+  cannot see fresh air.
+- **SCD41 altitude compensation.** New `Altitude (m)` number entity
+  (range 0..3000, step 10, default 0). NDIR CO₂ measurement is
+  pressure-dependent — at 1000 m altitude the uncompensated value
+  under-reads by ~3 %. The value is pushed into the sensor via
+  `set_sensor_altitude` (0x2427) as a u16 in metres per SCD4x
+  datasheet Section 3.6.3. Persists in NVS, re-pushed on every boot,
+  and cleared by the new "Reset Sensor Calibration" button below.
+- **Reset Sensor Calibration** button (SCD41 group). Issues
+  `perform_factory_reset` (0x3632, ~1200 ms per datasheet Section
+  3.9.2) which wipes the SCD41's on-chip EEPROM entirely, then
+  resets our four ESP-side calibration entities to Sensirion
+  defaults (temperature offset 4.0 °C, altitude 0 m, ASC on,
+  reference CO₂ 420 ppm) and re-pushes them into the blanked
+  sensor. After this button, the SCD41 is indistinguishable from a
+  freshly unboxed part. Wi-Fi credentials, night mode, and display
+  settings are NOT touched — use "Factory Reset" in the System
+  group for a full wipe.
+
+### Changed
+
+- **Particle-count unit label is `pcs/0.1L`** (previously ESPHome's
+  default `/dL`). Both notations describe the same quantity — the
+  Plantower manual defines it as "number of particles with diameter
+  beyond X µm in 0.1 L of air" — but `dL` is a chemistry/medical
+  unit (mg/dL for blood glucose) that reads out of place in a
+  particulate-matter context. Overridden per entity via
+  `unit_of_measurement`.
+- **Sensor (SCD41) group is reordered** so related entities sit
+  together: raw values (CO₂, room temp, humidity) → derived AQI
+  scores → calibration settings (offset, altitude, reference CO₂,
+  ASC) → action buttons (save, FRC, reset). Matches the pattern of
+  the Sensor (PMS5003) group.
+- **Sensor (PMS5003) group is reordered** so the six particle-count
+  entities sit immediately after the three mass concentrations,
+  followed by AQI scores, then controls, then the interpretation.
+- **New reference document
+  [`docs/aqi-basis.md`](docs/aqi-basis.md).** Long-form rationale
+  for every AQI threshold — Pettenkofer (1858), WHO 2021 24 h
+  guideline values, DIN EN ISO 7730, ASHRAE 55, Sedlbauer IBP
+  2001, UBA — plus the full text of every recommendation string
+  (DE + EN) and which class triggers which text. Explicitly marks
+  what is standards-derived versus design decision. README now
+  links to it from the AQI-thresholds section.
+
+### Removed
+
+- **`Reset Offset to Factory (4 °C)` button.** Redundant with the
+  new `Reset Sensor Calibration` button, which also restores the
+  temperature offset to 4 °C along with altitude, ASC, and reference
+  CO₂. Two overlapping "reset" buttons in the same group were
+  confusing; the more thorough action is the safer default.
+
+  **Home-Assistant impact:** the entity
+  `button.reset_offset_to_factory_4_c` is gone. Any automation
+  referencing it should be updated to
+  `button.reset_sensor_calibration`.
+
+### Fixed
+
+- **Air-quality scores and warning texts now track reality within
+  10-20 s.** Both the five AQI score sensors (CO₂, PM2.5, PM10,
+  Humidity, Overall) and the three template text sensors that
+  summarise them (Air Quality Verdict, Air Quality Action, Dust
+  Action) previously had `update_interval` values of 30-60 s. The
+  lambdas are pure reads over already-published state, so this cost
+  practically nothing, but it caused a visible UX bug during a
+  rapid air-quality change: during a candle test the Web-UI could
+  simultaneously show PM 10.0 = 137 µg/m³ (class 3, threshold <150)
+  next to `AQI PM10 Score = 4`, or PM 2.5 = 434 µg/m³ next to
+  `Dust Action = "alles sauber"`, because the derived values were
+  frozen from an earlier 60 s cycle. Ticking all eight sensors at
+  10 s keeps the score in step with the underlying sensor's own
+  update (30 s SCD41 / 60 s PMS5003), and keeps the text in step
+  with the score, so a real air-quality change propagates through
+  all three layers within one full 10 s tick.
+
+### Internal
+
+- New `apply_sensor_altitude` and `apply_asc_setting` scripts follow
+  the same stop → command → restart pattern as
+  `apply_temperature_offset`. All datasheet-mandated delays
+  (500 ms after stop, 400 ms after FRC, 1200 ms after factory
+  reset) are honoured explicitly.
+- The `on_boot` (priority -100) handler now re-pushes altitude and
+  ASC into the sensor after the 10 s settle window, in addition to
+  the existing temperature-offset push, so a power cycle without
+  an EEPROM save still ends up in the user-configured state.
+- All command codes, timings, and encodings are verified against
+  the Sensirion SCD4x datasheet
+  (`docs/datasheets/sensirion-scd4x.pdf`, Sections 3.6.3, 3.7.1,
+  3.7.2, 3.9.2). Particle-count entity names are verified against
+  the ESPHome `pmsx003` component (`pm_0_3um`, `pm_0_5um`,
+  `pm_1_0um`, `pm_2_5um`, `pm_5_0um`, `pm_10_0um`), and their
+  semantics ("particles > diameter per 0.1 L air") against the
+  Plantower PMS5003 manual.
+
 ## v2026.07.3 — 2026-07-06 — Web-UI Auth Required switch removed
 
 Bugfix release. Reflash recommended for users on v2026.07.2. No
