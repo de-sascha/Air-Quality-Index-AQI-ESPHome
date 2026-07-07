@@ -1033,7 +1033,7 @@ text_sensor:
       sorting_group_id: grp_display
       sorting_weight: 90
     id: verdict_text
-    update_interval: 30s
+    update_interval: 10s
     lambda: |-
       if (!id(aqi_overall).has_state()) return {"..."};
       int s = (int)id(aqi_overall).state;
@@ -1058,7 +1058,7 @@ text_sensor:
       sorting_group_id: grp_display
       sorting_weight: 100
     id: verdict_action
-    update_interval: 30s
+    update_interval: 10s
     lambda: |-
       if (!id(aqi_overall).has_state()) return {"..."};
       int overall = (int)id(aqi_overall).state;
@@ -1092,13 +1092,19 @@ text_sensor:
       return {"..."};
 
   # Fine-dust specific recommendation for the dust detail page.
+  # 10 s update interval matches verdict_text and verdict_action above:
+  # long enough not to spam the log, short enough that the text tracks a
+  # sudden air-quality change (candle lit, someone cooking, purifier
+  # switched on) within a few seconds. A 60 s interval here — combined
+  # with the AQI score sensors' own 60 s intervals — could add up to
+  # a 2 min stale text after a step change, which reads as broken UI.
   - platform: template
     name: "Dust Action"
     web_server:
       sorting_group_id: grp_sensor_pms5003
       sorting_weight: 80
     id: dust_action
-    update_interval: 60s
+    update_interval: 10s
     lambda: |-
       int pm25 = id(aqi_pm25).has_state() ? (int)id(aqi_pm25).state : -1;
       int pm10 = id(aqi_pm10).has_state() ? (int)id(aqi_pm10).state : -1;
