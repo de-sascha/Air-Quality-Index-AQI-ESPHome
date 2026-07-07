@@ -79,6 +79,14 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 - **Sensor (PMS5003) group is reordered** so the six particle-count
   entities sit immediately after the three mass concentrations,
   followed by AQI scores, then controls, then the interpretation.
+- **New reference document
+  [`docs/aqi-basis.md`](docs/aqi-basis.md).** Long-form rationale
+  for every AQI threshold — Pettenkofer (1858), WHO 2021 24 h
+  guideline values, DIN EN ISO 7730, ASHRAE 55, Sedlbauer IBP
+  2001, UBA — plus the full text of every recommendation string
+  (DE + EN) and which class triggers which text. Explicitly marks
+  what is standards-derived versus design decision. README now
+  links to it from the AQI-thresholds section.
 
 ### Removed
 
