@@ -1444,13 +1444,24 @@ sensor:
   # Temperature is intentionally NOT scored — the SCD41 sits inside
   # the enclosure and self-heats by a few degrees, so a temperature
   # traffic light would be misleading.
+  #
+  # All AQI score sensors tick at 10 s. The lambdas are pure reads
+  # over already-published sensor state, so this costs practically
+  # nothing. Longer intervals (previously 30-60 s) caused a visible
+  # UX bug: during a rapid air-quality change (candle test:
+  # PM 2.5 rose from 0 -> 434 -> 137 -> 75 within a few minutes)
+  # the score would stay pinned on the last calculated value for up
+  # to 60 s, so the Web-UI could show PM 10.0 = 137 µg/m³ next to
+  # "AQI PM10 Score = 4" even though 137 < 150 (the threshold for
+  # class 4). Ticking every 10 s keeps the score in step with the
+  # underlying sensor's own 30 s (SCD41) / 60 s (PMS5003) update.
   - platform: template
     name: "AQI CO2 Score"
     web_server:
       sorting_group_id: grp_sensor_scd41
       sorting_weight: 40
     id: aqi_co2
-    update_interval: 30s
+    update_interval: 10s
     lambda: |-
       if (!id(sens_co2).has_state()) return {};
       float v = id(sens_co2).state;
@@ -1466,7 +1477,7 @@ sensor:
       sorting_group_id: grp_sensor_pms5003
       sorting_weight: 50
     id: aqi_pm25
-    update_interval: 60s
+    update_interval: 10s
     lambda: |-
       if (!id(sens_pm_2_5).has_state()) return {};
       float v = id(sens_pm_2_5).state;
@@ -1482,7 +1493,7 @@ sensor:
       sorting_group_id: grp_sensor_pms5003
       sorting_weight: 51
     id: aqi_pm10
-    update_interval: 60s
+    update_interval: 10s
     lambda: |-
       if (!id(sens_pm_10_0).has_state()) return {};
       float v = id(sens_pm_10_0).state;
@@ -1498,7 +1509,7 @@ sensor:
       sorting_group_id: grp_sensor_scd41
       sorting_weight: 45
     id: aqi_hum
-    update_interval: 30s
+    update_interval: 10s
     lambda: |-
       if (!id(sens_humidity).has_state()) return {};
       float v = id(sens_humidity).state;
@@ -1515,7 +1526,7 @@ sensor:
       sorting_group_id: grp_display
       sorting_weight: 110
     id: aqi_overall
-    update_interval: 30s
+    update_interval: 10s
     lambda: |-
       float scores[] = {
         id(aqi_co2).has_state() ? id(aqi_co2).state : -1.0f,
