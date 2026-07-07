@@ -93,6 +93,21 @@ month. Example: `v2026.07.0` is the first release of July 2026,
   referencing it should be updated to
   `button.reset_sensor_calibration`.
 
+### Fixed
+
+- **Air-quality warnings now track reality within 10–20 s.** The
+  three template text sensors that summarise the AQI into
+  user-facing text (Air Quality Verdict, Air Quality Action, Dust
+  Action) had `update_interval` values of 30 s / 30 s / 60 s.
+  Combined with the AQI score sensors' own 60 s intervals, the
+  worst-case latency for the text to catch up with a real air
+  event was up to 2 minutes — during a candle test the sensor
+  correctly reported PM 2.5 = 434 µg/m³ and AQI = 4 within
+  seconds, but "Dust Action" still read "alles sauber". Dropped
+  all three to `update_interval: 10s`. The template lambdas are
+  pure reads over already-published state, so this is essentially
+  free.
+
 ### Internal
 
 - New `apply_sensor_altitude` and `apply_asc_setting` scripts follow
