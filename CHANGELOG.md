@@ -10,10 +10,11 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
-## v2026.07.5 — 2026-07-07 — ESPHome 2026.7 forward-compat fix
+## v2026.07.5 — 2026-07-07 — ESPHome 2026.7 forward-compat + defaults
 
-Compile-compatibility patch. No functional change; no reflash required
-unless you are upgrading ESPHome to 2026.7.0 or later.
+Compile-compatibility patch + default value adjustments.
+No reflash required unless upgrading ESPHome to 2026.7.0 or later,
+or if you want the new defaults on a fresh device.
 
 ### Fixed
 
@@ -24,6 +25,20 @@ unless you are upgrading ESPHome to 2026.7.0 or later.
   return type (`std::string`), no logic change. Discovered during a
   new-user compile simulation: the warning appeared on every compile
   but had not previously been noticed.
+
+### Changed
+
+- **`Display Brightness` default changed from 100 % to 50 %.** Full
+  brightness on a dark OLED in a dark room is uncomfortable. 50 %
+  is a more pleasant out-of-the-box experience; users who want full
+  brightness can raise the slider. Only affects first-boot / factory
+  reset — existing NVS-persisted values are not overwritten.
+- **`Night Mode Enabled` default changed from ON to OFF.** Night mode
+  is a personal preference and requires the user to configure start
+  and end times to be useful. Shipping it enabled by default caused
+  new devices to appear to have a broken display for users who
+  hadn't noticed or configured the time window. Only affects
+  first-boot / factory reset.
 
 ## v2026.07.4 — 2026-07-07 — Sensor deep-dive: particle counts, FRC, ASC, altitude, calibration reset
 
