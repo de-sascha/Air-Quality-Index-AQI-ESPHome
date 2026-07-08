@@ -10,6 +10,33 @@ month. Example: `v2026.07.0` is the first release of July 2026,
 
 _Nothing yet._
 
+## v2026.07.10 — 2026-07-08 — Web-UI clarity: AQI text + offset hint
+
+Two related Web-UI readability improvements that came out of a live
+session comparing the SCD41 against a reference hygrometer.
+
+### Changed
+
+- **Per-category AQI scores now render as words, not numbers.** The
+  `AQI CO2 Score`, `AQI Humidity Score`, `AQI PM2.5 Score` and
+  `AQI PM10 Score` entities previously showed as bare `0.0` rows,
+  which read as broken and required knowing the internal 0-4 scale.
+  They now show `TOP / GOOD / FAIR / POOR / CRITICAL` (or their
+  German equivalents `TOP / GUT / MITTEL / SCHLECHT / KRITISCH`),
+  following the same Language toggle as the existing
+  `Air Quality Verdict` entity. The numeric score sensors are kept
+  internally to feed the overall verdict, but no longer surface in
+  Web-UI or native API.
+
+### Added
+
+- **Settle-time hint under `Temperature Offset`.** A new row
+  `Temperature Offset — Note` explains that temperature and derived
+  humidity need ~30-60 min to re-stabilise after the offset changes.
+  Prevents the "I moved the slider and now humidity looks wrong"
+  confusion when cross-checking against a reference hygrometer soon
+  after the change.
+
 ## v2026.07.9 — 2026-07-07 — Revert v2026.07.7 + v2026.07.8 mode change
 
 Correction release. Two prior patches (v2026.07.7 and v2026.07.8)
