@@ -473,6 +473,6 @@ In principle yes, but the PMS5003 doesn't like vibrations and the operating temp
 
 ---
 
-*This manual is maintained together with the project. If something is unclear or missing, [please open an issue on GitHub](https://github.com/de-sascha/AirQuality/issues).*
+*This manual is maintained together with the project. If something is unclear or missing, [please open an issue on GitHub](https://github.com/de-sascha/Air-Quality-Index-AQI-ESPHome/issues).*
 
 *[Deutsche Version →](manual-de.md)*

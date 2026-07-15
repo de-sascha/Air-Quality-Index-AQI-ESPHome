@@ -473,6 +473,6 @@ Grundsätzlich ja, aber der PMS5003 mag keine Erschütterungen und das Betriebst
 
 ---
 
-*Diese Anleitung wird zusammen mit dem Projekt gepflegt. Wenn etwas unklar ist oder fehlt, [öffne bitte ein Issue auf GitHub](https://github.com/de-sascha/AirQuality/issues).*
+*Diese Anleitung wird zusammen mit dem Projekt gepflegt. Wenn etwas unklar ist oder fehlt, [öffne bitte ein Issue auf GitHub](https://github.com/de-sascha/Air-Quality-Index-AQI-ESPHome/issues).*
 
 *[English version →](manual-en.md)*
