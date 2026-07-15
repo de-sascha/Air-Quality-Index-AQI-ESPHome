@@ -21,8 +21,8 @@ Before you can flash or contribute, install ESPHome and create your
 own `secrets.yaml`:
 
 ```bash
-git clone https://github.com/de-sascha/AirQuality
-cd AirQuality
+git clone https://github.com/de-sascha/Air-Quality-Index-AQI-ESPHome
+cd Air-Quality-Index-AQI-ESPHome
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -67,8 +67,8 @@ change:
 
 ```bash
 # Fork the repo on GitHub, then:
-git clone https://github.com/<you>/AirQuality
-cd AirQuality
+git clone https://github.com/<you>/Air-Quality-Index-AQI-ESPHome
+cd Air-Quality-Index-AQI-ESPHome
 git checkout -b feat/<short-description> dev
 
 # Follow the "First-time setup" above to create your own secrets.yaml

@@ -171,7 +171,7 @@ were taken through that case's OLED cut-out.
 tailored to the exact XIAO ESP32-C6 + SCD41 + PMS5003 + SH1106 layout
 of this project, contributions are very welcome. Preferred route is to
 open an issue on this repository —
-[github.com/de-sascha/AirQuality/issues](https://github.com/de-sascha/AirQuality/issues)
+[github.com/de-sascha/Air-Quality-Index-AQI-ESPHome/issues](https://github.com/de-sascha/Air-Quality-Index-AQI-ESPHome/issues)
 — with rough sketches or STLs; alternatively, mention **@de-sascha**
 in an existing issue or discussion to get in touch. A merged design
 would replace this section and retire the AirGradient workaround.
@@ -189,8 +189,8 @@ free disk** for the ESP-IDF toolchain.
 ### 1. Install ESPHome
 
 ```bash
-git clone https://github.com/de-sascha/AirQuality.git
-cd AirQuality
+git clone https://github.com/de-sascha/Air-Quality-Index-AQI-ESPHome.git
+cd Air-Quality-Index-AQI-ESPHome
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -414,7 +414,7 @@ leaks (screenshot, chat log, screen share):
 ## Repository layout
 
 ```
-AirQuality/
+Air-Quality-Index-AQI-ESPHome/
 ├── README.md                             — this file
 ├── CHANGELOG.md                          — release notes
 ├── CONTRIBUTING.md                       — dev branch model + workflow
